@@ -1,0 +1,14 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      SERVICE_VERSION: "0.1.0"
+      MODEL_VERSION: "ru-detector-0.1.0"
+      MIN_CHARS: "300"
+      MAX_CHARS: "8000"
+      RISK_THRESH_LOW: "0.30"
+      RISK_THRESH_HIGH: "0.70"

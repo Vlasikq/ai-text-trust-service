@@ -1,0 +1,29 @@
+# ─── API framework ────────────────────────
+fastapi==0.128.0
+uvicorn[standard]==0.40.0
+pydantic==2.12.5
+pydantic-settings==2.12.0
+ 
+# ─── Observability ────────────────────────
+prometheus-client==0.24.1
+python-json-logger==4.0.0
+ 
+# ─── ML baseline ──────────────────────────
+scikit-learn>=1.3
+joblib>=1.3
+numpy>=1.23
+ 
+# ─── LLM backends (data generation) ──────
+openai>=1.0
+gigachat>=0.1.40
+requests>=2.31
+python-dotenv>=1.0
+ 
+# ─── Human data download ─────────────────
+datasets>=2.16
+zstandard
+jsonlines
+pysimdjson
+ 
+# ─── Utils ────────────────────────────────
+PyYAML==6.0.3
