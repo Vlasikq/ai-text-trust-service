@@ -153,13 +153,15 @@ def generate_paraphrase(
             elif method == "back-translation":
                 # Шаг 1: ru → en
                 bt = BACK_TRANSLATION_TEMPLATE
-                en_text = llm.generate(bt["system"], bt["user_to_en"].format(text=original_text[:6000]), temperature=0.3)
+                user_en = bt["user_to_en"].format(text=original_text[:6000])
+                en_text = llm.generate(bt["system"], user_en, temperature=0.3)
                 if not en_text:
                     errors += 1
                     continue
                 time.sleep(sleep_s)
                 # Шаг 2: en → ru
-                result = llm.generate(bt["system"], bt["user_to_ru"].format(text=en_text[:6000]), temperature=0.3)
+                user_ru = bt["user_to_ru"].format(text=en_text[:6000])
+                result = llm.generate(bt["system"], user_ru, temperature=0.3)
             else:
                 raise ValueError(f"Unknown method: {method}")
 
@@ -200,8 +202,14 @@ def generate_paraphrase(
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Generate adversarial test set via LLM paraphrase")
-    p.add_argument("--backend", choices=["yandex", "gigachat", "openai", "gemini"], default="yandex")
+    p = argparse.ArgumentParser(
+        description="Generate adversarial test set via LLM paraphrase",
+    )
+    p.add_argument(
+        "--backend",
+        choices=["yandex", "gigachat", "openai", "gemini"],
+        default="yandex",
+    )
     p.add_argument("--model", default=None)
     p.add_argument("--method", choices=["paraphrase", "back-translation"], default="paraphrase")
     p.add_argument("--count", type=int, default=200, help="Number of texts to paraphrase")

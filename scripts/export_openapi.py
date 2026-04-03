@@ -1,6 +1,6 @@
 import os
-import yaml
 
+import yaml
 from app.main import create_app
 
 OUT_PATH = os.path.join("openapi", "openapi.yaml")
