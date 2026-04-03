@@ -1,8 +1,10 @@
-# Project-specific 
 data/
 artifacts/
+!data/**/.gitkeep
+!artifacts/**/.gitkeep
 *.joblib
 *.pkl
+tmp_kaggle/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
