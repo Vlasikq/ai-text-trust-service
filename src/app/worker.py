@@ -27,14 +27,12 @@ from sqlalchemy import case, func, update
 
 from app.cache import DetectionCache
 from app.calibration.platt import ProbabilityCalibrator
-from app.config import DetectorType, Settings, get_settings
+from app.config import Settings, get_settings
 from app.database.engine import dispose_engine, init_engine
 from app.database.models import BatchJob, BatchStatus
 from app.database.persist import response_to_model
 from app.database.uow import UnitOfWork
-from app.detectors.cascade import CascadeDetector
-from app.detectors.tfidf import TFIDFDetector
-from app.detectors.transformer import TransformerDetector
+from app.detectors.factory import build_detector
 from app.explanation.markers import StyleExplainer
 from app.logging_config import set_correlation_id, setup_logging
 from app.preprocessing.pipeline import TextPreprocessor
@@ -50,36 +48,8 @@ ERROR_BACKOFF_S = 5.0
 _shutdown_requested = False
 
 
-def _build_detector(settings: Settings):
-    """Дубликат `main._build_detector`: для воркера тоже нужен каскад."""
-    tfidf = TFIDFDetector(settings.artifacts_dir)
-    if settings.detector_type == DetectorType.tfidf:
-        tfidf.load()
-        return tfidf
-
-    if not settings.transformer_dir.exists():
-        if settings.detector_type == DetectorType.transformer:
-            raise FileNotFoundError(f"Transformer required but not found: {settings.transformer_dir}")
-        tfidf.load()
-        return CascadeDetector(fast=tfidf, slow=None)
-
-    transformer = TransformerDetector(settings.transformer_dir)
-    if settings.detector_type == DetectorType.transformer:
-        transformer.load()
-        return transformer
-
-    cascade = CascadeDetector(
-        fast=tfidf,
-        slow=transformer,
-        cascade_lo=settings.cascade_lo,
-        cascade_hi=settings.cascade_hi,
-    )
-    cascade.load()
-    return cascade
-
-
 def _build_context(settings: Settings) -> DetectionContext:
-    detector = _build_detector(settings)
+    detector = build_detector(settings)
     log.info("Worker detector ready: %s", detector.get_info())
 
     calibrator: ProbabilityCalibrator | None = None
@@ -209,20 +179,27 @@ async def process_one_job(ctx: DetectionContext, deployment_id: str | None) -> b
                 )
                 await uow.analyses.save(analysis)
                 await uow.jobs.mark_success(job, analysis_id=analysis.id)
+                verdict_val = (
+                    outcome.response.verdict.value if outcome.response.verdict else None
+                )
                 log.info(
                     "job_succeeded",
                     extra={
                         "job_id": str(job.id),
-                        "verdict": outcome.response.verdict.value if outcome.response.verdict else None,
+                        "verdict": verdict_val,
                         "confidence": outcome.response.confidence,
                         "cascade_path": outcome.detection.metadata.get("cascade_path"),
                     },
                 )
             else:
                 # NO_DECISION или ERROR (timeout) — Analysis не сохраняем
-                err = f"status={outcome.response.status.value}; warnings={[w.value for w in outcome.response.warnings]}"
+                warn_codes = [w.value for w in outcome.response.warnings]
+                err = f"status={outcome.response.status.value}; warnings={warn_codes}"
                 await uow.jobs.mark_error(job, error=err)
-                log.warning("job_no_decision_or_error", extra={"job_id": str(job.id), "reason": err})
+                log.warning(
+                    "job_no_decision_or_error",
+                    extra={"job_id": str(job.id), "reason": err},
+                )
 
             if batch_id is not None:
                 await _bump_batch_progress(uow.session, batch_id, success=success)
@@ -310,6 +287,20 @@ async def main() -> None:
     )
 
     deployment_id = await _record_deployment(settings)
+
+    # Восстановление зависших job'ов: предыдущий инстанс мог умереть между
+    # claim_next и mark_*, иначе такие job'ы остаются в PROCESSING навсегда.
+    try:
+        async with UnitOfWork() as uow:
+            recovered = await uow.jobs.recover_stale_processing(timeout_minutes=10)
+            await uow.commit()
+        if recovered:
+            log.warning(
+                "stale_jobs_recovered",
+                extra={"count": recovered, "timeout_minutes": 10},
+            )
+    except Exception:
+        log.warning("stale_recovery_failed", exc_info=True)
 
     ctx = _build_context(settings)
 

@@ -13,7 +13,6 @@ from app.auth.tokens import (
     hash_refresh_token,
 )
 
-
 # ── argon2 passwords ──────────────────────────────────────────
 
 
@@ -96,6 +95,30 @@ class TestAccessJWT:
         token = _mk(audience="some-other-api")
         with pytest.raises(TokenError):
             decode_access_token(token, secret=SECRET, issuer=ISS, audience=AUD)
+
+    def test_algorithm_none_rejected_on_encode(self):
+        """'none' алгоритм отбрасывается до подписи."""
+        with pytest.raises(TokenError, match="unsupported algorithm"):
+            create_access_token(
+                user_id="u1", role="user", secret=SECRET,
+                issuer=ISS, audience=AUD, algorithm="none",
+            )
+
+    def test_algorithm_none_rejected_on_decode(self):
+        """Ослабленный config (algorithm='none') не должен пропускать токены."""
+        token = _mk()
+        with pytest.raises(TokenError, match="unsupported algorithm"):
+            decode_access_token(
+                token, secret=SECRET, issuer=ISS, audience=AUD, algorithm="none",
+            )
+
+    def test_asymmetric_algorithm_rejected(self):
+        """RS256 не должен использовать HS-секрет как public key."""
+        with pytest.raises(TokenError, match="unsupported algorithm"):
+            create_access_token(
+                user_id="u1", role="user", secret=SECRET,
+                issuer=ISS, audience=AUD, algorithm="RS256",
+            )
 
 
 # ── Refresh tokens (opaque) ───────────────────────────────────

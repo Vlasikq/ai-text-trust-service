@@ -5,16 +5,17 @@ Each repository takes an AsyncSession and provides typed CRUD + queries.
 ON CONFLICT DO NOTHING for idempotent writes.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.models import (
     Analysis,
     AnalysisJob,
+    BatchJob,
     Feedback,
     JobStatus,
     ModelDeployment,
@@ -60,6 +61,43 @@ class AnalysisRepository:
         )
         result = await self._session.execute(stmt)
         return result.rowcount > 0
+
+    async def get(self, analysis_id: UUID) -> Analysis | None:
+        """Получить Analysis по PK."""
+        return await self._session.get(Analysis, analysis_id)
+
+    async def get_history_page(
+        self,
+        user_id: UUID,
+        *,
+        limit: int,
+        cursor_ts: datetime | None = None,
+        cursor_id: UUID | None = None,
+    ) -> list[Analysis]:
+        """Composite-cursor пагинация по (requested_at, id) DESC.
+
+        Возвращает до `limit+1` строк, чтобы вызывающий понял, есть ли next page.
+        Tiebreaker по id — стабильный порядок при коллизиях timestamp (batch insert).
+        """
+        from sqlalchemy import and_, or_
+
+        stmt = (
+            select(Analysis)
+            .where(Analysis.user_id == user_id)
+            .order_by(Analysis.requested_at.desc(), Analysis.id.desc())
+            .limit(limit + 1)
+        )
+        if cursor_ts is not None and cursor_id is not None:
+            stmt = stmt.where(
+                or_(
+                    Analysis.requested_at < cursor_ts,
+                    and_(
+                        Analysis.requested_at == cursor_ts,
+                        Analysis.id < cursor_id,
+                    ),
+                )
+            )
+        return list((await self._session.execute(stmt)).scalars().all())
 
     async def get_by_request_id(self, request_id: UUID) -> Analysis | None:
         stmt = select(Analysis).where(Analysis.request_id == request_id)
@@ -209,6 +247,41 @@ class JobRepository:
         job.finished_at = _utcnow()
         job.input_text = None
         await self._session.flush()
+
+    async def recover_stale_processing(self, timeout_minutes: int = 10) -> int:
+        """Сбросить зависшие PROCESSING обратно в PENDING.
+
+        Сценарий: worker умер между `claim_next` и `mark_success/_error`.
+        Job со `started_at < NOW() - timeout` считаем брошенным.
+        Возвращает число восстановленных записей.
+        """
+        cutoff = _utcnow() - timedelta(minutes=timeout_minutes)
+        stmt = (
+            update(AnalysisJob)
+            .where(
+                AnalysisJob.status == JobStatus.PROCESSING,
+                AnalysisJob.started_at < cutoff,
+            )
+            .values(status=JobStatus.PENDING, worker_id=None, started_at=None)
+        )
+        result = await self._session.execute(stmt)
+        return result.rowcount or 0
+
+
+class BatchJobRepository:
+    """Batch-job операции, общие для роутеров и worker'а."""
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get_owned(self, batch_id: UUID, user_id: UUID) -> BatchJob | None:
+        """Вернуть batch, если он принадлежит юзеру; иначе None.
+
+        Чужие batch'и отдаются как 404 на уровне роутера — не утекаем факт
+        существования через 403.
+        """
+        stmt = select(BatchJob).where(BatchJob.id == batch_id, BatchJob.user_id == user_id)
+        return (await self._session.execute(stmt)).scalar_one_or_none()
 
 
 class DeploymentRepository:

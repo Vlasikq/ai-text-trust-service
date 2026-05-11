@@ -69,6 +69,9 @@ class StyleMarker(BaseModel):
 class Explanation(BaseModel):
     top_markers: list[StyleMarker]
     summary: str
+    # Шаблонные обороты, найденные в тексте. Пустой список = ничего не нашли;
+    # клиент использует это поле для подсветки, не дублируя словарь у себя.
+    matched_phrases: list[str] = []
 
 
 class MethodScore(BaseModel):

@@ -101,7 +101,10 @@ class TestDegradationScenarios:
                 pass
 
             def predict(self, text):
-                time.sleep(5)  # 5 seconds — will exceed timeout
+                # 5 секунд — запас над фактическим таймаутом 3с из dev .env
+                # (kwarg cascade_timeout_ms=100 перебивается pydantic-settings).
+                # Меньшее значение начинает флакать.
+                time.sleep(5)
                 return DetectionResult(prob_ai=0.5, method="slow", inference_ms=5000)
 
             def is_ready(self):
@@ -261,11 +264,12 @@ class TestRateLimitDecorators:
         get_settings.cache_clear()
         self._enable_limiter(monkeypatch)
 
-        from slowapi import _rate_limit_exceeded_handler
         from slowapi.errors import RateLimitExceeded
 
+        from app.middleware.ratelimit import rate_limit_exceeded_handler
+
         app = _app()
-        app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
         client = TestClient(app)
 
         codes = [
@@ -274,3 +278,52 @@ class TestRateLimitDecorators:
         ]
         # Хотя бы один 429 должен прилететь — bucket по IP исчерпан после 2 запросов.
         assert 429 in codes, f"ожидали 429 в серии, получили {codes}"
+
+    def test_429_response_has_retry_after_header(self, monkeypatch):
+        monkeypatch.setenv("RATE_LIMIT_ANALYZE", "1/minute")
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        self._enable_limiter(monkeypatch)
+
+        from slowapi.errors import RateLimitExceeded
+
+        from app.middleware.ratelimit import rate_limit_exceeded_handler
+
+        app = _app()
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+        client = TestClient(app)
+
+        client.post("/api/v1/analyze", json={"text": "Первый."})
+        second = client.post("/api/v1/analyze", json={"text": "Второй."})
+        assert second.status_code == 429
+        assert "retry-after" in {k.lower() for k in second.headers.keys()}
+
+    def test_anon_and_auth_buckets_independent(self, monkeypatch):
+        # Bucket делится по префиксу ключа: anon → ip:..., auth → auth:<token[:32]>.
+        # Один IP не должен делить лимит с авторизованным запросом.
+        monkeypatch.setenv("RATE_LIMIT_ANALYZE", "1/minute")
+        from app.config import get_settings
+
+        get_settings.cache_clear()
+        self._enable_limiter(monkeypatch)
+
+        from slowapi.errors import RateLimitExceeded
+
+        from app.middleware.ratelimit import rate_limit_exceeded_handler
+
+        app = _app()
+        app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+        client = TestClient(app)
+
+        anon = client.post("/api/v1/analyze", json={"text": "Anon."})
+        assert anon.status_code == 200
+        anon_burst = client.post("/api/v1/analyze", json={"text": "Anon-2."})
+        assert anon_burst.status_code == 429
+        # Авторизованный запрос с тем же IP — другой bucket, должен пройти.
+        auth = client.post(
+            "/api/v1/analyze",
+            json={"text": "Auth."},
+            headers={"Authorization": "Bearer differentbucket"},
+        )
+        assert auth.status_code == 200

@@ -128,17 +128,42 @@ class TestAnalyzeDebug:
 
 
 class TestAnalyzeValidation:
-    def test_empty_text_rejected(self, client):
-        resp = client.post("/api/v1/analyze", json={"text": ""})
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            pytest.param({"text": ""}, id="empty"),
+            pytest.param({}, id="missing"),
+            pytest.param({"text": "x" * 50_001}, id="too_long"),
+        ],
+    )
+    def test_payload_rejected(self, client, payload):
+        resp = client.post("/api/v1/analyze", json=payload)
         assert resp.status_code == 422
 
-    def test_missing_text_rejected(self, client):
-        resp = client.post("/api/v1/analyze", json={})
-        assert resp.status_code == 422
 
-    def test_too_long_text_rejected(self, client):
-        resp = client.post("/api/v1/analyze", json={"text": "x" * 50_001})
-        assert resp.status_code == 422
+class TestAnalyzeErrorPaths:
+    def test_detector_runtime_error_returns_500_without_traceback(self):
+        """Безопасный 500: текст исключения и traceback не утекают клиенту."""
+
+        class CrashingDetector(FakeDetector):
+            def predict(self, text):
+                raise RuntimeError("simulated detector crash with secret detail")
+
+        # raise_server_exceptions=False: TestClient по умолчанию ре-райзит
+        # серверные исключения, а нам нужен реальный response клиенту.
+        client = TestClient(
+            make_test_app(detector=CrashingDetector()),
+            raise_server_exceptions=False,
+        )
+        resp = client.post(
+            "/api/v1/analyze",
+            json={"text": "Длинный текст для анализа."},
+        )
+        assert resp.status_code == 500
+        body = resp.text
+        assert "Traceback" not in body
+        assert "RuntimeError" not in body
+        assert "secret detail" not in body
 
 
 # /health и /ready живут отдельно в tests/test_health.py — здесь не дублируем.
@@ -181,7 +206,10 @@ class TestGracefulDbDown:
         monkeypatch.setattr("app.database.persist.UnitOfWork", _FailingUoW)
 
         client = TestClient(app)
-        resp = client.post("/api/v1/analyze", json={"text": "Достаточно длинный текст для анализа."})
+        resp = client.post(
+            "/api/v1/analyze",
+            json={"text": "Достаточно длинный текст для анализа."},
+        )
 
         assert resp.status_code == 200
         # TestClient выполняет BackgroundTasks синхронно после возврата response.

@@ -38,6 +38,57 @@ class CorrelationIdFilter(logging.Filter):
         return True
 
 
+class SensitiveDataFilter(logging.Filter):
+    """Заменяет значения чувствительных полей в `extra`/`args` на `***REDACTED***`.
+
+    Ловит структурный лог `log.info("login", extra={"password": pw})`.
+    Не ловит сборку через f-string или `%s` в самом сообщении — это решается
+    тем, что мы пишем структурный JSON-лог везде в проекте.
+    """
+
+    SENSITIVE_FIELDS = frozenset(
+        {
+            "password",
+            "password_hash",
+            "jwt_secret",
+            "auth_jwt_secret",
+            "secret",
+            "access_token",
+            "refresh_token",
+            "token",
+            "authorization",
+            "bearer",
+            "pg_password",
+            "database_url",  # содержит пароль БД в DSN
+        }
+    )
+    REDACTED = "***REDACTED***"
+
+    def _scrub(self, value: object) -> object:
+        if isinstance(value, dict):
+            return {
+                k: (self.REDACTED if k.lower() in self.SENSITIVE_FIELDS else self._scrub(v))
+                for k, v in value.items()
+            }
+        if isinstance(value, (list, tuple)):
+            scrubbed = [self._scrub(v) for v in value]
+            return type(value)(scrubbed)
+        return value
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # `extra={...}` оседает прямо в record.__dict__ как атрибуты.
+        for key in list(record.__dict__.keys()):
+            if key.lower() in self.SENSITIVE_FIELDS:
+                record.__dict__[key] = self.REDACTED
+            else:
+                val = record.__dict__[key]
+                if isinstance(val, dict):
+                    record.__dict__[key] = self._scrub(val)
+        if isinstance(record.args, dict):
+            record.args = self._scrub(record.args)
+        return True
+
+
 def setup_logging(level: str = "INFO") -> None:
     """Configure root logger with JSON formatter and correlation_id filter.
 
@@ -60,6 +111,7 @@ def setup_logging(level: str = "INFO") -> None:
         )
     )
     handler.addFilter(CorrelationIdFilter())
+    handler.addFilter(SensitiveDataFilter())
 
     root = logging.getLogger()
     for existing in list(root.handlers):

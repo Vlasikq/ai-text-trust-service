@@ -18,6 +18,19 @@
 | Утечка деплоя | Подделка JWT после утечки секрета | отказ при старте, если `JWT_SECRET` остался дефолтным |
 | Канал БД | SQL-injection | SQLAlchemy ORM с параметризацией, raw SQL c пользовательскими данными нет нигде |
 
+## HTTP-заголовки на уровне Caddy
+
+[`scripts/deploy/Caddyfile`](../scripts/deploy/Caddyfile) выдаёт заголовки на каждом ответе. Их назначение:
+
+- `Strict-Transport-Security: max-age=31536000; includeSubDomains` — заставляет браузер переходить только по HTTPS. `preload` не включён намеренно: при потере TLS-сертификата подписка на HSTS-preload-список запирает домен в браузерах на год.
+- `Content-Security-Policy` с `script-src 'self' 'unsafe-inline' 'unsafe-eval'`, `style-src 'self' 'unsafe-inline'`, `connect-src 'self'`, `frame-ancestors 'none'`. `'unsafe-inline'` для стилей нужен Tailwind v4, `'unsafe-eval'` — recharts. `frame-ancestors 'none'` блокирует встраивание в iframe.
+- `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` отключает geolocation/microphone/camera/payment.
+- Заголовок `Server` снимается.
+
+`request_body { max_size 5MB }` отрезает гигантские тела до того, как они дойдут до FastAPI; у `/extract` и `/batch` есть свои строже лимиты на уровне приложения.
+
+Management-эндпоинты `/ready` и `/metrics` отдают `404` для запросов не из `private_ranges` (matcher `@management_external` в `Caddyfile`). Внутренний healthcheck Docker и SSH-отладка с самой машины работают, для внешнего адреса этих путей просто нет.
+
 ## Аутентификация и сессии
 
 ### Хеширование паролей: argon2id
@@ -51,6 +64,8 @@
 Время жизни — 15 минут (`access_token_ttl_minutes`). Декодирование stateless: `decode_access_token` не обращается к БД, только проверяет подпись и срок. За счёт этого API масштабируется горизонтально без общего хранилища сессий.
 
 Симметричный HS256 выбран вместо асимметричных RS256/ES256 по трём причинам. API одновременно подписывает и проверяет токены, поэтому не нужно публиковать public key. JWKS-эндпоинта нет, и не приходится ротовать пары ключей. Один секрет — одна точка хранения, что упрощает аудит.
+
+Алгоритм проверяется явным whitelist в [src/app/auth/tokens.py](../src/app/auth/tokens.py): `_ALLOWED_ALGORITHMS = {"HS256", "HS384", "HS512"}`, а `_check_algorithm` вызывается на каждом encode/decode. Без этого PyJWT принимает любое значение из заголовка токена, и `alg: none` или подмена HS256 → RS256 с публичным ключом превращаются в путь подделки токена.
 
 Цена решения: при утечке `JWT_SECRET` злоумышленник сможет подделать любой токен. Митигация — `_validate_settings_for_prod` в [src/app/main.py:115](src/app/main.py#L115), который падает с `RuntimeError`, если `IS_PRODUCTION=true`, а секрет остался дефолтным. Так отсекается распространённая ошибка «забыл переопределить через ENV». Хранение самого секрета обсуждается ниже в разделе «Известные ограничения».
 
@@ -116,7 +131,42 @@ Rate-limiting сделан через [slowapi](https://slowapi.readthedocs.io/)
 
 Хранилище счётчиков — in-memory в пределах процесса. Ограничение сознательное, обсуждается ниже в «Известных ограничениях».
 
+На 429 ответ кладётся заголовок `Retry-After`: стандартный обработчик slowapi его не выставляет, поэтому в [src/app/middleware/ratelimit.py](../src/app/middleware/ratelimit.py) определён `rate_limit_exceeded_handler`, который оборачивает дефолтный и проставляет `Retry-After` из `exc.retry_after`. Клиенты, опирающиеся на стандартный retry-pattern, получают точный интервал ожидания вместо «ну попробуй через минуту».
+
 Чего лимиты не закрывают: распределённой атаки с большого пула IP. Для этого нужны правила WAF на уровне Caddy или внешнего балансировщика — отнесено к плану после защиты.
+
+## Авторизация на уровне ресурсов
+
+Аутентификация (кто это) и авторизация (что ему можно) разведены. JWT и `get_current_user` решают только первое. Доступ к чужим записям закрыт точечными проверками в роутерах.
+
+- `GET /me/analyses/{id}` ([src/app/routers/me.py](../src/app/routers/me.py)) сначала достаёт запись, потом сравнивает `analysis.user_id` с `current_user.id`. Несовпадение и отсутствие записи дают одинаковый 404 — иначе из ответа можно было бы понять, существует ли запись у другого пользователя (enumeration через timing).
+- `POST /api/v1/feedback` ([src/app/routers/feedback.py](../src/app/routers/feedback.py)) пускает анонимный отзыв на анализ без owner'а, но если у анализа есть `user_id` и автор отзыва не он — 403. Так закрыт сценарий, при котором A портит репутацию анализу B чужим feedback'ом.
+- `POST /api/v1/batch/{id}/...` ([src/app/routers/batch.py](../src/app/routers/batch.py)) проверяет, что batch принадлежит пользователю, через `BatchJobRepository.get_owned(batch_id, user_id)`. Чужой batch на чтение и на скачивание результатов недоступен.
+
+## Уникальность email независимо от регистра
+
+Регистрация по email чувствительна к гонке: два запроса с `Email@x.com` и `email@x.com` без нормализации проходят оба, дальше при логине постоянное время на одном из них становится непредсказуемым.
+
+Миграция [alembic/versions/005_email_lower_index.py](../alembic/versions/005_email_lower_index.py) заменяет обычный `UNIQUE(email)` на expression-индекс `UNIQUE (lower(email))`. PostgreSQL проверяет уникальность по lower-форме, и параллельный INSERT с тем же email в другом регистре получает `IntegrityError`. Тест [`tests/integration/test_auth_repositories.py::test_unique_email_case_insensitive`](../tests/integration/test_auth_repositories.py) фиксирует поведение.
+
+## Логи без чувствительных данных
+
+Структурированное логирование настроено в [src/app/logging_config.py](../src/app/logging_config.py). У всех логгеров, использующих сервис-формат, навешан `SensitiveDataFilter`. Он рекурсивно проходит по `record.args` и `record.extra` и заменяет значения у ключей из `SENSITIVE_FIELDS` (`password`, `password_hash`, `jwt_secret`, `access_token`, `refresh_token`, `token`, `authorization`, `bearer`, `pg_password`, `database_url`) на строку `***redacted***`. Опечатка типа `log.info("login ok", extra={"refresh_token": value})` не попадает в Cloud Logging в открытом виде.
+
+Сбой калибровки или объяснения в [src/app/services/detection.py](../src/app/services/detection.py) пишется как `log.warning("calibration_failed", extra={"request_id": request_id}, exc_info=True)`. У записи стабильное сообщение (можно искать grep'ом или Loki-фильтром), есть `request_id` для корреляции с HTTP-запросом и есть `exc_info` со стек-трейсом — этого хватает для диагностики без переотрисовки самого текста пользователя.
+
+## Аудит зависимостей
+
+Перед каждой стабилизацией ветки прогоняется `uv run pip-audit`. CVE-фиксы за последний цикл:
+
+- `cryptography` → 48.x (несколько CVE-2025/2026 на ASN.1 и X.509);
+- `mako` → 1.3.12 (CVE на template-выражения);
+- `pytest` → 9.0.3 (DoS через нестрого парсимые junit-xml);
+- `urllib3` → 2.7.0 (redirect-handling);
+- `pillow` → 12.2.0 (memory bounds в decoder'ах форматов);
+- `python-multipart` → 0.0.28 (CVE-2026-40347/42561, ReDoS на multipart-парсере).
+
+После апгрейда `uv pip-audit` повторяется и фиксируется в локальном `docs/_internal/baseline.txt`. Этого достаточно для дипломного стенда; для боевого сервиса место такому отчёту — в CI, где «нет известных CVE» становится merge-условием.
 
 ## Приватность по умолчанию
 
@@ -153,15 +203,29 @@ Async-задачи — единственное место, где текст в
 - `CORS_ORIGINS="*"` (несовместимо с `allow_credentials=True` — CSRF);
 - любой origin в `CORS_ORIGINS` идёт без TLS (`http://...`).
 
-Валидация на уровне `Settings`, а не FastAPI lifespan, нужна потому, что воркер (`src/app/worker.py`) 
+Валидация на уровне `Settings`, а не FastAPI lifespan, нужна потому, что воркер (`src/app/worker.py`) — отдельный entrypoint и через lifespan FastAPI не проходит. Если бы проверки жили только там, воркер мог бы тихо стартовать с дефолтным секретом.
 
 ### Версионирование
 
-Значение `SERVICE_VERSION` должно совпадать в трёх местах: `pyproject.toml`, `Settings.service_version`, тег docker-образа. Если, например, поправили только `pyproject.toml`, но забыли про `env` в `docker-compose.prod.yml`, Swagger UI и поле `Analysis.service_version` будут показывать старую версию, а образ — новую. На код-ревью это легко пропустить. Чтобы такого не было, источник правды на стороне деплоя один: `SERVICE_VERSION` задаётся в env-блоке docker-compose и оттуда подтягивается в `Settings`.
+`Settings.service_version` резолвится через `_resolve_service_version` в [src/app/config.py](../src/app/config.py): сначала `importlib.metadata.version("ai-text-trust-service")`, при `PackageNotFoundError` — чтение `pyproject.toml` через `tomllib`. Источник правды один — `pyproject.toml`, и значение попадает и в Swagger UI (`FastAPI(version=...)`), и в `analyses.service_version` без отдельной синхронизации. Переменная `SERVICE_VERSION` в `docker-compose` оставлена как override для hotfix-тегов, отличных от версии пакета.
 
 ### Резервный канал записи при падении БД
 
 Если PostgreSQL упадёт во время работы, `persist_analysis_with_fallback` из [src/app/database/persist.py](src/app/database/persist.py) запишет результат анализа в JSONL-файл по пути `DB_FALLBACK_LOG_PATH`. Сервис продолжит отвечать клиентам, и деградация останется частичной. Так появляется окно в несколько часов на восстановление БД без общего простоя.
+
+### Восстановление зависших async-задач
+
+Воркер ([src/app/worker.py](../src/app/worker.py)) при старте вызывает `JobRepository.recover_stale_processing(timeout_minutes=10)`. Метод атомарным UPDATE возвращает в очередь `PENDING` задачи, у которых `status='PROCESSING'` и `started_at` старше десяти минут. Так закрыт сценарий, когда воркер падает посреди обработки и job остаётся «вечно в работе» — без recovery такая job торчала бы в БД, пока её не нашёл бы человек.
+
+## Восстановление доступа к VM
+
+Прод-стенд живёт на одной YC Compute Instance. SSH-ключ задаётся через cloud-init при первом boot'е и в репозитории не лежит ([scripts/deploy/.local/ssh_authorized_keys](../scripts/deploy/.local/ssh_authorized_keys) в `.gitignore`). Если ноут с приватным ключом потерян или содержимое `~/.ssh/aitrust_yc` повреждено, доступ восстанавливается одним из трёх путей.
+
+1. **Serial Console + OS Login.** В YC у инстанса `aitrust-vm` включено `serial_port_settings.ssh_authorization=OS_LOGIN`. Через YC Console → инстанс → Serial Console доступен логин под IAM-идентичностью команды (`yc oslogin`). Это production-стандартный путь: ключи не нужны, аудит логинов лежит в Cloud Logging.
+2. **YC CLI пересборка VM.** В корне рендер-скрипты ([scripts/deploy/render_cloud_init.py](../scripts/deploy/render_cloud_init.py)) собирают `cloud-init.yaml` с подставленным новым `ssh_authorized_keys` из `scripts/deploy/.local/`. `yc compute instance delete aitrust-vm` + `yc compute instance create --metadata-from-file user-data=cloud-init.rendered.yaml` поднимает идентичный стенд за 5 минут. Пользовательских данных в БД (Managed Postgres) теряем 0 — она живёт отдельно.
+3. **Полный фейловер на свежий проект.** При компрометации SA-токена или потере доступа к YC-аккаунту: новый folder, новый SA, `terraform apply` или повтор шагов из `docs/DEPLOYMENT.md`. Это последний вариант, нужен пересоздаваемый DNS-A-record на новый IP.
+
+Что НЕ используем: продакшен-стандартный «снапшот VM + restore». YC такой механизм даёт, но для дипломного стенда стоимость хранения и сложность настройки не оправдывают редкость отказа: пересборка из cloud-init детерминированна и проще снапшота. После защиты этот пункт стоит пересмотреть.
 
 ## Управление секретами в репозитории
 

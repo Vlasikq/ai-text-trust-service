@@ -5,7 +5,6 @@ from pydantic import ValidationError
 
 from app.config import DetectorType, Settings, get_settings
 
-
 _PROD_JWT_OK = "x" * 48  # 48 hex chars — реалистичный JWT_SECRET после ротации
 _PROD_DB_OK = "postgresql+asyncpg://aitrust:pw@db.internal:5432/aitrust"
 
@@ -90,7 +89,22 @@ class TestSettingsOverrides:
         # Чистим SERVICE_VERSION, чтобы default из Settings не перебивался .env-файлом.
         monkeypatch.delenv("SERVICE_VERSION", raising=False)
         s = Settings(_env_file=None)  # should not raise
-        assert s.service_version == "0.3.0"
+        # service_version резолвится из pyproject.toml — фиксируем формат, не значение.
+        assert s.service_version.count(".") >= 2
+
+    def test_service_version_matches_pyproject(self, monkeypatch):
+        # Кросс-проверка: ENV не задан, файл .env игнорируется → значение должно
+        # совпасть с тем, что положено в pyproject.toml.
+        monkeypatch.delenv("SERVICE_VERSION", raising=False)
+        import tomllib
+        from pathlib import Path
+
+        pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            expected = tomllib.load(f)["project"]["version"]
+
+        s = Settings(_env_file=None)
+        assert s.service_version == expected
 
 
 class TestDetectorTypeEnum:

@@ -1,22 +1,14 @@
 "use client";
 
-// Token-level подсветка: находим в тексте конкретные шаблонные обороты + помечаем
-// слишком длинные предложения отдельным значком сбоку.
-// Это эвристика, опирающаяся на те же стилеметрические признаки, которые видит
-// StyleExplainer на бэке (длина предложения + formal_connector_ratio).
+// Token-level подсветка: шаблонные обороты + значок у слишком длинных
+// предложений. Эвристика на тех же признаках, которые видит StyleExplainer
+// на бэке (длина предложения + formal_connector_ratio).
 
 import { useMemo } from "react";
 
-interface Marker {
-  feature: string;
-  value: number;
-  human_baseline: number;
-  deviation_percent: number;
-  direction: "above" | "below";
-}
-
-// Шаблонные связки и обороты, типичные для GPT-стиля русскоязычного письма.
-const FORMAL_CONNECTORS = [
+// Локальный словарь — fallback на случай, если бэк не вернул matched_phrases
+// (например, запись из истории, сделанная до появления поля).
+const FALLBACK_CONNECTORS = [
   "стали неотъемлемой частью",
   "является неотъемлемой частью",
   "представляет собой",
@@ -155,13 +147,17 @@ function buildSegments(text: string, matches: Match[]): Segment[] {
 
 export function TextHighlights({
   text,
-  markers: _markers,
+  matchedPhrases,
 }: {
   text: string;
-  markers: Marker[];
+  matchedPhrases?: string[] | null;
 }) {
   const { segments, longSentences, totalConnectors } = useMemo(() => {
-    const matches = findMatches(text, FORMAL_CONNECTORS);
+    const terms =
+      matchedPhrases && matchedPhrases.length > 0
+        ? matchedPhrases
+        : FALLBACK_CONNECTORS;
+    const matches = findMatches(text, terms);
     const sentences = splitSentencesWithSpans(text);
     const avg =
       sentences.length > 0
@@ -174,7 +170,7 @@ export function TextHighlights({
       longSentences: longs,
       totalConnectors: matches.length,
     };
-  }, [text]);
+  }, [text, matchedPhrases]);
 
   if (text.length === 0) return null;
 

@@ -6,12 +6,10 @@
 в один и тот же миллисекунд / batch-импорт). См. SECURITY review «3».
 """
 
-from collections import defaultdict
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import and_, or_, select
 
 from app.auth.dependencies import get_current_user
 from app.config import get_settings
@@ -35,6 +33,7 @@ from app.schemas import (
 from app.schemas import (
     Status as AnalysisStatus,
 )
+from app.services.stats import compute_user_stats
 
 router = APIRouter(prefix="/me", tags=["me"])
 
@@ -113,27 +112,12 @@ async def my_analyses(
         cursor_ts, cursor_id = _parse_cursor(cursor)
 
     async with UnitOfWork() as uow:
-        stmt = (
-            select(Analysis)
-            .where(Analysis.user_id == UUID(str(user.id)))
-            .order_by(Analysis.requested_at.desc(), Analysis.id.desc())
-            .limit(limit + 1)  # +1 чтобы понять, есть ли next page
+        rows = await uow.analyses.get_history_page(
+            UUID(str(user.id)),
+            limit=limit,
+            cursor_ts=cursor_ts,
+            cursor_id=cursor_id,
         )
-        if cursor_ts is not None and cursor_id is not None:
-            # Композитное условие "(requested_at, id) < (cursor_ts, cursor_id)"
-            # в DESC-порядке: либо строго раньше по timestamp, либо тот же
-            # timestamp и меньший id.
-            stmt = stmt.where(
-                or_(
-                    Analysis.requested_at < cursor_ts,
-                    and_(
-                        Analysis.requested_at == cursor_ts,
-                        Analysis.id < cursor_id,
-                    ),
-                )
-            )
-
-        rows = (await uow.session.execute(stmt)).scalars().all()
 
     items = [
         AnalysisHistoryItem(
@@ -175,8 +159,7 @@ async def my_analysis_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
 
     async with UnitOfWork() as uow:
-        stmt = select(Analysis).where(Analysis.id == aid)
-        analysis = (await uow.session.execute(stmt)).scalar_one_or_none()
+        analysis = await uow.analyses.get(aid)
 
     if analysis is None or str(analysis.user_id) != str(user.id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Analysis not found")
@@ -206,14 +189,6 @@ async def my_analysis_detail(
         explanation=explanation,
         disclaimer=get_settings().disclaimer_text,
     )
-
-
-_PERIOD_DAYS: dict[StatsPeriod, int | None] = {
-    StatsPeriod.p7d: 7,
-    StatsPeriod.p30d: 30,
-    StatsPeriod.p90d: 90,
-    StatsPeriod.p_all: None,
-}
 
 
 def _zero_pad_daily(
@@ -249,69 +224,28 @@ async def my_stats(
     user: User = Depends(get_current_user),
     period: StatsPeriod = Query(default=StatsPeriod.p30d),
 ) -> StatsResponse:
-    """Агрегаты по анализам пользователя за окно `period`.
-
-    Выгружаем все Analysis пользователя в окне одной выборкой и собираем
-    агрегаты в Python — для типичной нагрузки ЛК (≤ нескольких сотен записей)
-    это проще, чем 4 GROUP BY-запроса. Daily zero-padded, чтобы фронт не
-    делал mock-данных под пустые дни.
-    """
-    now = datetime.now(timezone.utc)
-    period_end = now
-    days = _PERIOD_DAYS[period]
-    period_start: datetime | None = (now - timedelta(days=days)) if days else None
-
+    """Агрегаты по анализам пользователя за окно `period`."""
     user_uuid = UUID(str(user.id))
     async with UnitOfWork() as uow:
-        stmt = select(Analysis).where(Analysis.user_id == user_uuid)
-        if period_start is not None:
-            stmt = stmt.where(Analysis.requested_at >= period_start)
-        rows = (await uow.session.execute(stmt)).scalars().all()
+        agg, period_start, period_end = await compute_user_stats(
+            uow, user_id=user_uuid, period=period
+        )
 
-    by_verdict: dict[str, int] = defaultdict(int)
-    by_risk: dict[str, int] = defaultdict(int)
-    by_detector: dict[str, int] = defaultdict(int)
-    confidences: list[float] = []
-    daily_raw: dict[date, dict[str, int]] = defaultdict(
-        lambda: {"total": 0, "ai": 0, "human": 0}
-    )
-    earliest: datetime | None = None
+    # Для "all" сужаем окно до самого раннего анализа, если он есть; иначе
+    # оставляем потолок 365 дней, чтобы daily не оказался пустым списком.
+    if period == StatsPeriod.p_all and agg.earliest is not None:
+        period_start = agg.earliest
 
-    for a in rows:
-        if a.verdict:
-            by_verdict[a.verdict] += 1
-        if a.risk_level:
-            by_risk[a.risk_level] += 1
-        by_detector[a.detector_used] += 1
-        if a.confidence is not None:
-            confidences.append(a.confidence)
-
-        d = a.requested_at.astimezone(timezone.utc).date()
-        bucket = daily_raw[d]
-        bucket["total"] += 1
-        if a.verdict == "ai":
-            bucket["ai"] += 1
-        elif a.verdict == "human":
-            bucket["human"] += 1
-
-        if earliest is None or a.requested_at < earliest:
-            earliest = a.requested_at
-
-    # period_start для "all" — самый ранний анализ или сегодня (если данных нет).
-    if period_start is None:
-        period_start = earliest if earliest is not None else period_end
-
-    daily = _zero_pad_daily(daily_raw, period_start.date(), period_end.date())
-    avg_conf = sum(confidences) / len(confidences) if confidences else None
+    daily = _zero_pad_daily(agg.daily, period_start.date(), period_end.date())
 
     return StatsResponse(
         period=period,
         period_start=period_start.isoformat(),
         period_end=period_end.isoformat(),
-        total_scans=len(rows),
-        by_verdict=dict(by_verdict),
-        by_risk_level=dict(by_risk),
-        by_detector=dict(by_detector),
-        avg_confidence=avg_conf,
+        total_scans=agg.total_scans,
+        by_verdict=agg.by_verdict,
+        by_risk_level=agg.by_risk_level,
+        by_detector=agg.by_detector,
+        avg_confidence=agg.avg_confidence,
         daily=daily,
     )

@@ -19,6 +19,11 @@ import chardet
 
 SourceFormat = Literal["txt", "docx", "pdf"]
 
+# Защита от zip-bomb на DOCX/PDF: размер файла на edge не гарантирует, что
+# распакованное содержимое тоже скромное.
+MAX_PDF_PAGES = 200
+MAX_DOCX_TOTAL_CHARS = 200_000
+
 
 class ExtractError(ValueError):
     """Не удалось извлечь текст: encrypted/scanned PDF, битый DOCX, неизвестный тип."""
@@ -111,15 +116,26 @@ def _extract_docx(data: bytes) -> ExtractResult:
         raise ExtractError(f"Не удалось прочитать DOCX: {e}") from e
 
     parts: list[str] = []
+    total_chars = 0
     for p in doc.paragraphs:
         if p.text.strip():
             parts.append(p.text)
+            total_chars += len(p.text)
+            if total_chars > MAX_DOCX_TOTAL_CHARS:
+                raise ExtractError(
+                    f"DOCX слишком большой: больше {MAX_DOCX_TOTAL_CHARS} знаков"
+                )
     for table in doc.tables:
         for row in table.rows:
             for cell in row.cells:
                 cell_text = "\n".join(p.text for p in cell.paragraphs if p.text.strip())
                 if cell_text:
                     parts.append(cell_text)
+                    total_chars += len(cell_text)
+                    if total_chars > MAX_DOCX_TOTAL_CHARS:
+                        raise ExtractError(
+                            f"DOCX слишком большой: больше {MAX_DOCX_TOTAL_CHARS} знаков"
+                        )
 
     text = "\n\n".join(parts).strip()
     if not text:
@@ -153,6 +169,12 @@ def _extract_pdf(data: bytes) -> ExtractResult:
             raise ExtractError(
                 "PDF защищён паролем. Снимите защиту и загрузите снова."
             )
+
+    if len(reader.pages) > MAX_PDF_PAGES:
+        raise ExtractError(
+            f"PDF слишком большой: {len(reader.pages)} страниц (лимит {MAX_PDF_PAGES}). "
+            "Разделите документ и загрузите по частям."
+        )
 
     parts: list[str] = []
     for page in reader.pages:

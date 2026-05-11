@@ -4,11 +4,12 @@ GET  /api/v1/stats     — aggregate analytics (admin-only).
 """
 
 import logging
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.config import get_settings
 from app.database.models import Feedback, User, UserRole
 from app.database.uow import UnitOfWork
@@ -34,14 +35,41 @@ class FeedbackResponse(BaseModel):
 
 @router.post("/feedback", response_model=FeedbackResponse)
 @limiter.limit(lambda: get_settings().rate_limit_feedback)
-async def submit_feedback(body: FeedbackRequest, request: Request):
+async def submit_feedback(
+    body: FeedbackRequest,
+    request: Request,
+    user: User | None = Depends(get_current_user_optional),
+):
+    """Сохранить пользовательскую коррекцию вердикта.
+
+    Ownership: если у `analysis_id` есть владелец — пишет только он;
+    иначе (анонимный analysis / нет analysis_id / битый UUID) — анонимный feedback OK.
+    """
     db_enabled = getattr(request.app.state, "db_enabled", False)
     if not db_enabled:
         raise HTTPException(status_code=503, detail="Database not available")
 
+    aid: UUID | None = None
+    if body.analysis_id:
+        try:
+            aid = UUID(body.analysis_id)
+        except ValueError:
+            # Битый UUID не подсвечиваем 400, чтобы не давать оракул на формат:
+            # пишем feedback без привязки, ownership-чек тогда не нужен.
+            aid = None
+
     async with UnitOfWork() as uow:
+        if aid is not None:
+            analysis = await uow.analyses.get(aid)
+            if analysis is not None and analysis.user_id is not None:
+                if user is None or user.id != analysis.user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Feedback на чужой анализ запрещён",
+                    )
+
         fb = Feedback(
-            analysis_id=body.analysis_id,
+            analysis_id=aid,
             text_hash=body.text_hash,
             user_verdict=body.user_verdict,
             source=body.source,

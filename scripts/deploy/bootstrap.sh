@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Bootstrap-скрипт VM. Запускается из cloud-init runcmd как `bash /opt/aitrust/bootstrap.sh`.
-# НЕ используем set -e — нам важно увидеть все шаги в логе, даже если один упал.
-# set -x для подробных трасс в /var/log/cloud-init-output.log + serial console.
+# Strict-режим включён. Шаги, которые ожидаемо могут упасть (systemctl на
+# свежем хосте, docker compose до полного запуска), обёрнуты в `|| echo`, чтобы
+# bootstrap не валился целиком из-за одного transient-фейла.
+set -euo pipefail
 set -x
 
 LOG=/var/log/aitrust-bootstrap.log

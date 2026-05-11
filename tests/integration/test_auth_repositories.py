@@ -1,9 +1,11 @@
 """Тесты UserRepository + RefreshTokenRepository.
 
 Покрытие:
-  - User: create, get_by_id, get_by_email (case-insensitive), unique email constraint, update_last_login
-  - RefreshToken: create, get_by_token_hash, revoke (с replaced_by), revoke_all_for_user
-  - reuse-detection scenario: revoke_all_for_user после presented revoked token
+  - User: create, get_by_id, get_by_email (case-insensitive),
+    unique email constraint, update_last_login
+  - RefreshToken: create, get_by_token_hash, revoke (с replaced_by),
+    revoke_all_for_user
+  - reuse-detection: revoke_all_for_user после presented revoked token
 """
 
 from datetime import datetime, timedelta, timezone
@@ -84,6 +86,12 @@ class TestUserRepository:
         assert found.email == "alice@example.com"
         assert found.status == UserStatus.ACTIVE
         assert found.role == UserRole.USER
+        # created_at заполняется server-default 'now()' — проверяем, что round-trip
+        # вернул timezone-aware datetime, а не None.
+        assert found.created_at is not None
+        assert found.created_at.tzinfo is not None
+        # last_login_at не выставлялся при create — должен прийти как None из БД.
+        assert found.last_login_at is None
 
     async def test_get_by_email_case_insensitive(self, db_session):
         repo = UserRepository(db_session)
@@ -108,6 +116,17 @@ class TestUserRepository:
         # Пытаемся вставить второго с тем же email → IntegrityError.
         with pytest.raises(IntegrityError):
             await repo.create(_make_user(email="duplicate@example.com"))
+            await db_session.commit()
+        await db_session.rollback()
+
+    async def test_unique_email_case_insensitive(self, db_session):
+        """Регистр в email не должен открывать второй аккаунт на ту же почту."""
+        repo = UserRepository(db_session)
+        await repo.create(_make_user(email="Owner@Example.com"))
+        await db_session.commit()
+
+        with pytest.raises(IntegrityError):
+            await repo.create(_make_user(email="owner@example.com"))
             await db_session.commit()
         await db_session.rollback()
 

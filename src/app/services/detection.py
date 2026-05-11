@@ -110,7 +110,12 @@ async def run_detection(
             warnings=warnings,
             disclaimer=ctx.settings.disclaimer_text,
         )
-        return DetectionOutcome(response=response, detection=None, preprocessing=prep, cached_hit=False)
+        return DetectionOutcome(
+            response=response,
+            detection=None,
+            preprocessing=prep,
+            cached_hit=False,
+        )
 
     # 2. Кеш.
     # Ключ включает model_version: при смене артефакта старые записи не отдаются,
@@ -142,7 +147,12 @@ async def run_detection(
                 warnings=[WarningCode.inference_timeout],
                 disclaimer=ctx.settings.disclaimer_text,
             )
-            return DetectionOutcome(response=response, detection=None, preprocessing=prep, cached_hit=False)
+            return DetectionOutcome(
+                response=response,
+                detection=None,
+                preprocessing=prep,
+                cached_hit=False,
+            )
 
         if ctx.cache:
             ctx.cache.put(prep.text, result, ctx.settings.model_version)
@@ -160,7 +170,11 @@ async def run_detection(
             calibrated = ctx.calibrator.calibrate(result.prob_ai, result.method)
             confidence = calibrated
         except Exception:
-            log.warning("Calibration failed for request %s", request_id, exc_info=True)
+            log.warning(
+                "calibration_failed",
+                extra={"request_id": request_id},
+                exc_info=True,
+            )
             warnings.append(WarningCode.calibration_unavailable)
 
     # 4. Уровень риска и вердикт.
@@ -181,7 +195,11 @@ async def run_detection(
             if explanation is not None:
                 warnings.append(WarningCode.style_explanation_heuristic)
         except Exception:
-            log.warning("Explanation failed for request %s", request_id, exc_info=True)
+            log.warning(
+                "explanation_failed",
+                extra={"request_id": request_id},
+                exc_info=True,
+            )
 
     # 6. Debug method scores
     method_scores = None

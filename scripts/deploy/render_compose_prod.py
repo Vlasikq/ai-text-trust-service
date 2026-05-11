@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from urllib.parse import quote
 
 DEPLOY_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DEPLOY_DIR.parent.parent
@@ -47,8 +48,9 @@ def main() -> None:
     jwt_secret = _read_env("JWT_SECRET")
     image = f"cr.yandex/{args.reg_id}/aitrust-api:{args.tag}"
     web_image = f"cr.yandex/{args.reg_id}/aitrust-web:{args.web_tag}"
+    # quote(safe='') escape'ит спец-символы пароля (:, @, /, ?, #, &, %, пробел).
     db_url = (
-        f"postgresql+asyncpg://{args.pg_user}:{pg_password}"
+        f"postgresql+asyncpg://{args.pg_user}:{quote(pg_password, safe='')}"
         f"@{args.pg_host}:6432/{args.pg_database}?ssl=require"
     )
 

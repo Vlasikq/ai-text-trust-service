@@ -5,7 +5,8 @@
 FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN npm ci --no-audit --no-fund --ignore-scripts \
+    && npm rebuild sharp
 
 # ── Stage 2: build ─────────────────────────────────────────────
 FROM node:22-alpine AS builder

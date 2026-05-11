@@ -30,8 +30,8 @@ export const viewport: Viewport = {
   themeColor: "#2563eb",
   width: "device-width",
   initialScale: 1,
-  maximumScale: 1,
-  userScalable: false,
+  // maximumScale и userScalable не выставляем: WCAG 1.4.4 (Resize Text)
+  // требует, чтобы пользователь мог увеличить страницу до 200%.
 };
 
 export default function RootLayout({

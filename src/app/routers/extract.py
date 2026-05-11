@@ -9,6 +9,7 @@ Privacy: содержимое не сохраняется в БД и не лог
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
@@ -23,6 +24,9 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/extract", tags=["extract"])
 
 MAX_FILE_BYTES = 5 * 1024 * 1024  # 5 МБ
+
+# Отрезаем «медленные файлы»: 408 вместо зависшего соединения.
+EXTRACT_TIMEOUT_S = 10.0
 
 
 class ExtractTextResponse(BaseModel):
@@ -47,10 +51,20 @@ async def extract_text(
         )
 
     try:
-        result = extract(
-            raw,
-            content_type=file.content_type,
-            filename=file.filename,
+        # extract() синхронный — уносим в поток, чтобы не блокировать event loop.
+        result = await asyncio.wait_for(
+            asyncio.to_thread(
+                extract,
+                raw,
+                content_type=file.content_type,
+                filename=file.filename,
+            ),
+            timeout=EXTRACT_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=408,
+            detail=f"Извлечение файла превысило {EXTRACT_TIMEOUT_S:.0f} секунд",
         )
     except ExtractError as e:
         raise HTTPException(status_code=400, detail=str(e))

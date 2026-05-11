@@ -12,6 +12,7 @@ Usage:
 from app.database import engine as engine_mod
 from app.database.repositories import (
     AnalysisRepository,
+    BatchJobRepository,
     DeploymentRepository,
     FeedbackRepository,
     JobRepository,
@@ -29,6 +30,7 @@ class UnitOfWork:
         self.feedback = FeedbackRepository(self.session)
         self.deployments = DeploymentRepository(self.session)
         self.jobs = JobRepository(self.session)
+        self.batches = BatchJobRepository(self.session)
         self.users = UserRepository(self.session)
         self.refresh_tokens = RefreshTokenRepository(self.session)
         return self

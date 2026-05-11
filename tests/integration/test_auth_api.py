@@ -225,8 +225,9 @@ class TestLogout:
         body = await _register(client, email="ida@example.com")
         refresh = body["tokens"]["refresh_token"]
         # Дважды разлогиниваемся — без ошибок.
-        assert (await client.post("/auth/logout", json={"refresh_token": refresh})).status_code == 204
-        assert (await client.post("/auth/logout", json={"refresh_token": refresh})).status_code == 204
+        payload = {"refresh_token": refresh}
+        assert (await client.post("/auth/logout", json=payload)).status_code == 204
+        assert (await client.post("/auth/logout", json=payload)).status_code == 204
 
     async def test_logout_unknown_token_idempotent(self, client):
         resp = await client.post("/auth/logout", json={"refresh_token": "garbage-refresh-string"})

@@ -11,6 +11,7 @@ import json
 import logging
 from pathlib import Path
 
+from app.explanation._phrases import find_matched_phrases
 from app.features.stylometric import extract_all
 from app.schemas import Explanation, StyleMarker
 
@@ -141,7 +142,12 @@ class StyleExplainer:
         top = deviations[:top_n]
 
         summary = self._build_summary(top)
-        return Explanation(top_markers=top, summary=summary)
+        matched_phrases = find_matched_phrases(text)
+        return Explanation(
+            top_markers=top,
+            summary=summary,
+            matched_phrases=matched_phrases,
+        )
 
     def _build_summary(self, markers: list[StyleMarker]) -> str:
         if not markers:

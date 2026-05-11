@@ -8,15 +8,8 @@ import {
   type AnalysisHistoryItem,
   type AnalysisHistoryPage,
 } from "@/lib/api";
+import { RISK_BADGE_CLS, VERDICT_LABEL_SHORT } from "@/lib/labels";
 import { useAuth } from "@/lib/auth";
-
-const VERDICT_LABEL = { ai: "ИИ", human: "Человек" } as const;
-const RISK_CLS: Record<string, string> = {
-  HIGH: "bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300",
-  MEDIUM:
-    "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300",
-  LOW: "bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300",
-};
 
 export default function HistoryPage() {
   const { user, loading: authLoading } = useAuth();
@@ -95,12 +88,12 @@ export default function HistoryPage() {
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-sm">
-                      {it.verdict ? VERDICT_LABEL[it.verdict] : "—"}
+                      {it.verdict ? VERDICT_LABEL_SHORT[it.verdict] : "—"}
                     </span>
                     {it.risk_level && (
                       <span
                         className={`text-xs px-1.5 py-0.5 rounded font-medium ${
-                          RISK_CLS[it.risk_level] || ""
+                          RISK_BADGE_CLS[it.risk_level] || ""
                         }`}
                       >
                         {it.risk_level}

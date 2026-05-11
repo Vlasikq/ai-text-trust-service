@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# aitrust-web
 
-## Getting Started
+Next.js 16 (App Router) PWA для сервиса ai-text-trust. Это тонкий клиент над
+FastAPI-бэком: форма анализа текста, история анализов, статистика, batch.
 
-First, run the development server:
+## Стек
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- Next.js 16 App Router + React 19
+- Tailwind v4 (через `@import "tailwindcss"`, без `tailwind.config`)
+- recharts 3 для графиков на `/me/stats` (ленивый импорт)
+- react-hook-form + zod для форм авторизации
+- standalone-output Next.js → ~150 MB Docker-образ
+
+## Команды
+
+```powershell
+npm ci                  # установить зависимости
+npm run dev             # dev-сервер на :3000
+npm run build           # production build
+npm start               # запустить production build
+npm run lint            # ESLint (eslint-config-next 9 flat config)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## ENV
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Переменная | Дефолт | Назначение |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | `""` (same-origin) | Базовый URL API. Пустая строка = тот же origin, что и фронт (продовый паттерн с Caddy). Cross-origin: `https://api.example.com`. |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+`.env.local` подхватывается `next` автоматически — там же кладите локальные
+переопределения для dev.
 
-## Learn More
+## Где что лежит
 
-To learn more about Next.js, take a look at the following resources:
+- `src/app/` — App Router маршруты (главная, `/login`, `/register`, `/me/*`, `/batch`)
+- `src/components/` — `AnalyzeForm`, `ResultCard`, `TextHighlights`, `SegmentedText`, `Nav`, `AuthForm`
+- `src/lib/api.ts` — типы и обёртка fetch с авто-refresh на 401
+- `src/lib/auth.tsx` — `AuthProvider` + `useAuth` хук
+- `src/lib/labels.ts` — общие подписи и цвета verdict/risk/warning
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Контракт с бэком
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+API-эндпоинты, которые трогает фронт, перечислены в `apiEndpoints` в
+[src/lib/api.ts](src/lib/api.ts). Префиксы — по политике из
+[../../docs/ARCHITECTURE_DECISIONS.md](../../docs/ARCHITECTURE_DECISIONS.md)
+(`/api/v1/*` — домен, `/auth/*` и `/me/*` — без префикса).
 
-## Deploy on Vercel
+## Docker
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Multi-stage `Dockerfile` собирает standalone-output (~150 MB). См.
+[../../docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md) для прод-деплоя.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Подробнее
+
+- Корневой [README](../../README.md) — общая картина сервиса
+- [docs/ARCHITECTURE.md](../../docs/ARCHITECTURE.md) — бэкенд и слои
+- [docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md) — Caddy, YC, cloud-init

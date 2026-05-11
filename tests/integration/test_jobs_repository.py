@@ -3,6 +3,7 @@
 Использует реальный Postgres через `db_session` fixture (conftest.py).
 """
 
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
@@ -221,3 +222,63 @@ class TestMarkers:
         assert fresh.input_text is None
         assert fresh.error_message is not None
         assert len(fresh.error_message) == 1000
+
+
+class TestRecoverStaleProcessing:
+    """Восстановление job'ов, у которых worker умер до mark_success/_error."""
+
+    async def test_old_processing_returned_to_pending(self, db_session):
+        repo = JobRepository(db_session)
+        job = _make_job()
+        await repo.create(job)
+        await db_session.commit()
+
+        # Имитация: worker подобрал job 20 минут назад и больше не отозвался.
+        claimed = await repo.claim_next("dead-worker")
+        assert claimed is not None
+        claimed.started_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+        await db_session.commit()
+
+        recovered = await repo.recover_stale_processing(timeout_minutes=10)
+        await db_session.commit()
+
+        assert recovered == 1
+        fresh = await repo.get_by_id(job.id)
+        assert fresh is not None
+        assert fresh.status == JobStatus.PENDING
+        assert fresh.worker_id is None
+        assert fresh.started_at is None
+
+    async def test_fresh_processing_not_touched(self, db_session):
+        repo = JobRepository(db_session)
+        job = _make_job()
+        await repo.create(job)
+        await db_session.commit()
+
+        claimed = await repo.claim_next("active-worker")
+        assert claimed is not None
+        await db_session.commit()
+
+        recovered = await repo.recover_stale_processing(timeout_minutes=10)
+        await db_session.commit()
+
+        assert recovered == 0
+        fresh = await repo.get_by_id(job.id)
+        assert fresh is not None
+        assert fresh.status == JobStatus.PROCESSING
+        assert fresh.worker_id == "active-worker"
+
+    async def test_pending_jobs_not_touched(self, db_session):
+        """PENDING не должен меняться recover'ом."""
+        repo = JobRepository(db_session)
+        job = _make_job()
+        await repo.create(job)
+        await db_session.commit()
+
+        recovered = await repo.recover_stale_processing(timeout_minutes=10)
+        await db_session.commit()
+
+        assert recovered == 0
+        fresh = await repo.get_by_id(job.id)
+        assert fresh is not None
+        assert fresh.status == JobStatus.PENDING

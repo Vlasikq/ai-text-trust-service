@@ -1,8 +1,11 @@
 node_modules
 .next
+.next/cache
 .env*
 !.env.example
 *.log
+*.local
+coverage
 README.md
 .git
 .gitignore

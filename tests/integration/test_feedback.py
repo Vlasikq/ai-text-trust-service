@@ -15,11 +15,12 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy import text as sql_text
 from uuid_utils import uuid7
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, get_current_user_optional
 from app.database import engine as engine_mod
 from app.database.models import Analysis, Feedback, User, UserRole, UserStatus
 from app.database.uow import UnitOfWork
@@ -188,6 +189,124 @@ class TestSubmitFeedback:
     # неудобный 5xx и был бы хрупким.
 
 
+class TestFeedbackOwnership:
+    """Feedback на чужой анализ возвращает 403."""
+
+    @staticmethod
+    async def _seed_user_and_analysis(
+        owner_id: uuid.UUID | None, *, email_suffix: str
+    ) -> uuid.UUID:
+        """Создать User (если owner_id указан) и Analysis с user_id=owner_id."""
+        async with UnitOfWork() as uow:
+            if owner_id is not None:
+                await uow.users.create(
+                    User(
+                        id=owner_id,
+                        email=f"owner-{email_suffix}@example.com",
+                        password_hash="$argon2id$dummy",
+                        status=UserStatus.ACTIVE,
+                        role=UserRole.USER,
+                    )
+                )
+            analysis_id = uuid7()
+            await uow.analyses.save(
+                Analysis(
+                    id=analysis_id,
+                    request_id=uuid7(),
+                    text_hash="o" * 64,
+                    text_length=500,
+                    status="SUCCESS",
+                    verdict="ai",
+                    confidence=0.85,
+                    risk_level="HIGH",
+                    detector_used="tfidf",
+                    inference_ms=10.0,
+                    cached=False,
+                    model_version="v1",
+                    service_version="0.1.0",
+                    user_id=owner_id,
+                    requested_at=datetime.now(timezone.utc),
+                )
+            )
+            await uow.commit()
+        return analysis_id
+
+    async def test_owner_can_submit_feedback(self, app_with_engine, client):
+        owner_id = uuid.uuid4()
+        analysis_id = await self._seed_user_and_analysis(owner_id, email_suffix="own")
+
+        owner = User(
+            id=owner_id, email="owner-own@example.com",
+            password_hash="$argon2id$dummy",
+            status=UserStatus.ACTIVE, role=UserRole.USER,
+        )
+        app_with_engine.dependency_overrides[get_current_user_optional] = lambda: owner
+        try:
+            resp = await client.post(
+                "/api/v1/feedback",
+                json={"analysis_id": str(analysis_id), "user_verdict": "human"},
+            )
+            assert resp.status_code == 200
+        finally:
+            app_with_engine.dependency_overrides.pop(get_current_user_optional, None)
+
+    async def test_other_user_gets_403(self, app_with_engine, client):
+        owner_id = uuid.uuid4()
+        analysis_id = await self._seed_user_and_analysis(owner_id, email_suffix="other")
+
+        intruder_id = uuid.uuid4()
+        async with UnitOfWork() as uow:
+            await uow.users.create(
+                User(
+                    id=intruder_id, email="intruder@example.com",
+                    password_hash="$argon2id$dummy",
+                    status=UserStatus.ACTIVE, role=UserRole.USER,
+                )
+            )
+            await uow.commit()
+        intruder = User(
+            id=intruder_id, email="intruder@example.com",
+            password_hash="$argon2id$dummy",
+            status=UserStatus.ACTIVE, role=UserRole.USER,
+        )
+        app_with_engine.dependency_overrides[get_current_user_optional] = lambda: intruder
+        try:
+            resp = await client.post(
+                "/api/v1/feedback",
+                json={"analysis_id": str(analysis_id), "user_verdict": "human"},
+            )
+            assert resp.status_code == 403
+            assert "чужой" in resp.json()["detail"].lower()
+        finally:
+            app_with_engine.dependency_overrides.pop(get_current_user_optional, None)
+
+    async def test_anonymous_user_on_owned_analysis_gets_403(self, client):
+        analysis_id = await self._seed_user_and_analysis(uuid.uuid4(), email_suffix="anon")
+        # Без override: get_current_user_optional возвращает None (anonymous).
+        resp = await client.post(
+            "/api/v1/feedback",
+            json={"analysis_id": str(analysis_id), "user_verdict": "human"},
+        )
+        assert resp.status_code == 403
+
+    async def test_anonymous_user_on_anonymous_analysis_allowed(self, client):
+        """analysis.user_id is None → feedback анонимный без auth разрешён."""
+        analysis_id = await self._seed_user_and_analysis(None, email_suffix="none")
+        resp = await client.post(
+            "/api/v1/feedback",
+            json={"analysis_id": str(analysis_id), "user_verdict": "ai"},
+        )
+        assert resp.status_code == 200
+
+    async def test_invalid_uuid_in_analysis_id_does_not_break(self, client):
+        """Невалидный UUID не должен ронять 500 — просто сохраняем без привязки."""
+        resp = await client.post(
+            "/api/v1/feedback",
+            json={"analysis_id": "not-a-uuid", "user_verdict": "ai"},
+        )
+        assert resp.status_code == 200
+
+
 # ── GET /api/v1/stats ────────────────────────────────────────
 
 
@@ -266,7 +385,7 @@ class TestFeedbackSchemas:
         assert req.comment == "test"
 
     def test_unknown_verdict_raises(self):
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             FeedbackRequest(user_verdict="unknown")
 
     def test_response_default_status(self):

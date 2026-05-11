@@ -102,9 +102,9 @@ class TestAnalysisRepo:
         await db_session.flush()
 
         stats = await repo.get_stats()
-        assert stats["total"] >= 3
-        assert stats["by_risk_level"].get("HIGH", 0) >= 2
-        assert stats["by_detector"].get("tfidf", 0) >= 2
+        assert stats["total"] == 3
+        assert stats["by_risk_level"]["HIGH"] == 2
+        assert stats["by_detector"]["tfidf"] == 2
 
     async def test_warnings_stored(self, db_session):
         repo = AnalysisRepository(db_session)

@@ -89,7 +89,11 @@ async def analyze(
             risk_level=response.risk_level.value if response.risk_level else None,
             confidence=response.confidence or 0.0,
             latency_s=response.processing_time_ms / 1000,
-            cascade_path=outcome.detection.metadata.get("cascade_path") if outcome.detection else None,
+            cascade_path=(
+                outcome.detection.metadata.get("cascade_path")
+                if outcome.detection
+                else None
+            ),
         )
 
     # Запись в БД идёт фоновой задачей, если БД включена и есть результат детекции.

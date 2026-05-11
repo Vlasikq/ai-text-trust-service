@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from urllib.parse import quote
 
 DEPLOY_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = DEPLOY_DIR.parent.parent
 ENV_LOCAL = PROJECT_ROOT / ".env.local"
+# Публичные SSH-ключи лежат вне репо: render берёт их отсюда. Файл gitignored,
+# не должен попасть в коммит ни при каком сценарии (даже git add -A).
+SSH_AUTHORIZED_KEYS_FILE = DEPLOY_DIR / ".local" / "ssh_authorized_keys"
 
 
 def _read_env(key: str, *, required: bool = True) -> str | None:
@@ -42,6 +46,32 @@ def _read_pg_password() -> str:
     return _read_env("PG_PASSWORD")
 
 
+def _read_ssh_authorized_keys() -> str:
+    """Собрать YAML-блок ssh_authorized_keys из gitignored файла.
+
+    Файл `scripts/deploy/.local/ssh_authorized_keys` — по одному ключу на строку,
+    как в обычном `~/.ssh/authorized_keys`. Пустые строки и комментарии (#) игнорируем.
+    Если файла нет — render падает с инструкцией: VM можно поднять и без ключа
+    (Serial Console через OS Login), но в дефолте требуем явного шага оператора.
+    """
+    if not SSH_AUTHORIZED_KEYS_FILE.exists():
+        raise FileNotFoundError(
+            f"{SSH_AUTHORIZED_KEYS_FILE} не найден. Положите туда публичные SSH-ключи "
+            "(по одному на строку, формат authorized_keys). Этот файл в .gitignore.\n"
+            "Пример: cp ~/.ssh/aitrust_yc.pub " + str(SSH_AUTHORIZED_KEYS_FILE)
+        )
+    lines = []
+    for raw in SSH_AUTHORIZED_KEYS_FILE.read_text(encoding="utf-8").splitlines():
+        key = raw.strip()
+        if not key or key.startswith("#"):
+            continue
+        # 6 пробелов — уровень элемента списка под `ssh_authorized_keys:` в YAML.
+        lines.append(f"      - {key}")
+    if not lines:
+        raise ValueError(f"{SSH_AUTHORIZED_KEYS_FILE} пуст — нужен хотя бы один ключ")
+    return "\n".join(lines)
+
+
 def _indent(text: str, spaces: int = 6) -> str:
     """Indent every line for embedding inside cloud-init `content: |` block."""
     pad = " " * spaces
@@ -51,8 +81,16 @@ def _indent(text: str, spaces: int = 6) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reg-id", required=True, help="Container Registry ID")
-    parser.add_argument("--pg-host", required=True, help="Managed PG FQDN (rc1a-xxx.mdb.yandexcloud.net)")
-    parser.add_argument("--domain", required=True, help="Domain Caddy выпустит сертификат для (e.g. 89.169.141.35.sslip.io)")
+    parser.add_argument(
+        "--pg-host",
+        required=True,
+        help="Managed PG FQDN (rc1a-xxx.mdb.yandexcloud.net)",
+    )
+    parser.add_argument(
+        "--domain",
+        required=True,
+        help="Domain Caddy выпустит сертификат для (e.g. 89.169.141.35.sslip.io)",
+    )
     parser.add_argument("--tag", default="0.1.0", help="Docker image tag (api)")
     parser.add_argument(
         "--web-tag", default="0.1.0", help="Docker image tag for aitrust-web"
@@ -77,8 +115,10 @@ def main() -> None:
     web_image = f"cr.yandex/{args.reg_id}/aitrust-web:{args.web_tag}"
     # ssl=require (не verify-full) — для MVP избегаем mount root.crt в контейнер.
     # Если нужен полный TLS verify — добавить volume cert и `?sslrootcert=...&ssl=verify-full`.
+    # quote(safe='') escape'ит спец-символы пароля (:, @, /, ?, #, &, %), иначе DSN
+    # ломается. Например, пароль `p@ss:w0rd` без quote → `aitrust:p@ss:w0rd@host`.
     db_url = (
-        f"postgresql+asyncpg://{args.pg_user}:{pg_password}"
+        f"postgresql+asyncpg://{args.pg_user}:{quote(pg_password, safe='')}"
         f"@{args.pg_host}:6432/{args.pg_database}?ssl=require"
     )
 
@@ -96,10 +136,13 @@ def main() -> None:
     bootstrap = (DEPLOY_DIR / "bootstrap.sh").read_text(encoding="utf-8")
     bootstrap = bootstrap.replace("__DOMAIN__", args.domain)
 
+    ssh_keys_block = _read_ssh_authorized_keys()
+
     template = (DEPLOY_DIR / "cloud-init.yaml.template").read_text(encoding="utf-8")
     rendered = template.replace("__COMPOSE_CONTENT__", _indent(compose))
     rendered = rendered.replace("__CADDYFILE_CONTENT__", _indent(caddyfile))
     rendered = rendered.replace("__BOOTSTRAP_CONTENT__", _indent(bootstrap))
+    rendered = rendered.replace("__SSH_AUTHORIZED_KEYS__", ssh_keys_block)
 
     out = DEPLOY_DIR / "cloud-init.rendered.yaml"
     out.write_text(rendered, encoding="utf-8")

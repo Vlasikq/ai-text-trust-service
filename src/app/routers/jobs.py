@@ -104,7 +104,9 @@ async def get_job(job_id: str, request: Request) -> JobStatusResponse:
         if job.status == JobStatus.SUCCESS and job.analysis_id is not None:
             analysis = await uow.analyses.get_by_request_id(job.request_id)
             if analysis is not None:
-                result_payload = _analysis_to_response(analysis, settings=request.app.state.settings)
+                result_payload = _analysis_to_response(
+                    analysis, settings=request.app.state.settings
+                )
 
     return JobStatusResponse(
         job_id=str(job.id),
@@ -132,7 +134,8 @@ def _analysis_to_response(analysis, settings) -> AnalyzeResponse:
             summary=analysis.explanation.get("summary", ""),
         )
 
-    method_scores = None  # method_scores вне JSONB не сохраняется; debug-режим не используется в jobs
+    # method_scores вне JSONB не сохраняется; debug-режим в jobs не используется.
+    method_scores = None
 
     return AnalyzeResponse(
         request_id=str(analysis.request_id),

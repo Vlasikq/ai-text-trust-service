@@ -114,6 +114,46 @@ class TestPdf:
         with pytest.raises(ExtractError):
             extract(b"not a pdf", filename="bad.pdf")
 
+    def test_pdf_page_limit_enforced(self):
+        """PDF с >MAX_PDF_PAGES отбрасывается до парсинга текстового слоя."""
+        import pypdf
+
+        from app.services.file_extractor import MAX_PDF_PAGES
+
+        writer = pypdf.PdfWriter()
+        for _ in range(MAX_PDF_PAGES + 1):
+            writer.add_blank_page(width=595, height=842)
+        buf = io.BytesIO()
+        writer.write(buf)
+
+        with pytest.raises(ExtractError, match="страниц"):
+            extract(buf.getvalue(), filename="huge.pdf")
+
+
+class TestDocxLimits:
+    """Лимит общего количества символов DOCX — защита от zip-bomb."""
+
+    def test_docx_total_chars_limit_enforced(self):
+        from app.services.file_extractor import MAX_DOCX_TOTAL_CHARS
+
+        # Один большой абзац уже превышает лимит → должно прерваться раньше,
+        # чем мы успеем съесть всю память на расширении xml.
+        oversized = "А" * (MAX_DOCX_TOTAL_CHARS + 100)
+        data = _make_docx([oversized])
+        with pytest.raises(ExtractError, match="DOCX слишком большой"):
+            extract(data, filename="huge.docx")
+
+    def test_docx_within_limit_succeeds(self):
+        """Лимит не отрезает DOCX заведомо допустимого размера."""
+        from app.services.file_extractor import MAX_DOCX_TOTAL_CHARS
+
+        # 80% от лимита — заведомо допустимый текст.
+        ok_text = "ц" * (MAX_DOCX_TOTAL_CHARS * 8 // 10)
+        data = _make_docx([ok_text])
+        result = extract(data, filename="ok.docx")
+        assert result.source_format == "docx"
+        assert len(result.text) >= MAX_DOCX_TOTAL_CHARS * 8 // 10
+
 
 class TestFormatDetection:
     def test_unknown_extension_defaults_to_txt(self):

@@ -5,6 +5,7 @@
 
 from enum import Enum
 from functools import lru_cache
+from importlib import metadata
 from pathlib import Path
 from typing import Self
 
@@ -24,6 +25,29 @@ _LOCAL_DB_HOSTS = ("localhost", "127.0.0.1", "::1")
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
+def _resolve_service_version() -> str:
+    """Достать версию пакета из единого источника — pyproject.toml.
+
+    Сначала пробуем installed metadata (быстро, работает после `pip install`).
+    Fallback — прямое чтение pyproject.toml в репо и Docker-образе.
+    """
+    try:
+        return metadata.version("ai-text-trust-service")
+    except metadata.PackageNotFoundError:
+        pass
+
+    import tomllib
+
+    for candidate in (PROJECT_ROOT / "pyproject.toml", Path("/app/pyproject.toml")):
+        if candidate.is_file():
+            with open(candidate, "rb") as f:
+                data = tomllib.load(f)
+            version = data.get("project", {}).get("version")
+            if version:
+                return str(version)
+    return "0.0.0-dev"
+
+
 class DetectorType(str, Enum):
     tfidf = "tfidf"
     transformer = "transformer"
@@ -32,10 +56,10 @@ class DetectorType(str, Enum):
 
 class Settings(BaseSettings):
     # Метаданные сервиса.
-    # service_version должен совпадать с тегом образа aitrust-api:<service_version>
-    # и значением в pyproject.toml. Попадает в /health, /ready, Swagger UI
-    # и поле Analysis.service_version.
-    service_version: str = "0.3.0"
+    # Источник правды — pyproject.toml. ENV SERVICE_VERSION оставлен как
+    # override для случаев, когда тег образа отличается от значения в pyproject
+    # (например, hotfix-build без bump'а версии).
+    service_version: str = Field(default_factory=_resolve_service_version)
     model_version: str = "ru-detector-0.1.0"
     # В проде включается через ENV IS_PRODUCTION=true.
     # При is_production=true lifespan не стартует с дефолтным JWT_SECRET.

@@ -32,6 +32,11 @@
     --foreground: #f3f4f6;
     --muted: #9ca3af;
     --border: #1f2937;
+    /* Акцентные цвета на тёмном фоне светлее, чтобы держать AA-контраст */
+    --primary: #3b82f6;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --success: #4ade80;
   }
 }
 

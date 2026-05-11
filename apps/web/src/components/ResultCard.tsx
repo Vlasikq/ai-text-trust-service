@@ -1,40 +1,11 @@
 "use client";
 
 import type { AnalyzeResponse } from "@/lib/api";
+import { RISK_STYLE, VERDICT_LABEL_FULL, WARNING_LABEL } from "@/lib/labels";
 import { TextHighlights } from "./TextHighlights";
 
-const VERDICT_LABEL = {
-  ai: "Сгенерировано ИИ",
-  human: "Написано человеком",
-} as const;
-
-const RISK_STYLES: Record<string, { label: string; cls: string }> = {
-  HIGH: {
-    label: "ВЫСОКИЙ риск",
-    cls: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/30 dark:text-red-300",
-  },
-  MEDIUM: {
-    label: "СРЕДНИЙ риск",
-    cls: "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/30 dark:text-amber-300",
-  },
-  LOW: {
-    label: "НИЗКИЙ риск",
-    cls: "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/30 dark:text-green-300",
-  },
-};
-
-const WARNING_LABEL: Record<string, string> = {
-  TEXT_TOO_SHORT: "Текст короткий — точность снижена",
-  TEXT_TRUNCATED: "Текст обрезан до 8000 символов",
-  TRANSFORMER_UNAVAILABLE: "Доступен только TF-IDF (трансформер недоступен)",
-  LOW_CONFIDENCE: "Низкая уверенность",
-  CALIBRATION_UNAVAILABLE: "Калибровка отключена",
-  INFERENCE_TIMEOUT: "Превышено время инференса",
-  STYLE_EXPLANATION_HEURISTIC: "Объяснение — эвристическое",
-};
-
-// Локализация имён стилеметрических признаков. Ключи — ровно те, что отдаёт
-// scripts/stylometric_features.py (см. _extract_single).
+// Локализация имён стилеметрических признаков. Ключи совпадают с тем, что
+// возвращает app.features.stylometric.extract_all.
 const FEATURE_INFO: Record<string, { label: string; hint?: string }> = {
   // base
   text_len: { label: "Длина текста" },
@@ -199,7 +170,7 @@ export function ResultCard({
   onClose?: () => void;
 }) {
   const isNoDecision = result.status !== "SUCCESS";
-  const risk = result.risk_level ? RISK_STYLES[result.risk_level] : null;
+  const risk = result.risk_level ? RISK_STYLE[result.risk_level] : null;
   const explanation = result.explanation;
 
   return (
@@ -233,7 +204,7 @@ export function ResultCard({
                 Вердикт
               </div>
               <div className="text-2xl font-bold mt-1">
-                {result.verdict ? VERDICT_LABEL[result.verdict] : "—"}
+                {result.verdict ? VERDICT_LABEL_FULL[result.verdict] : "—"}
               </div>
               {result.confidence !== null && result.verdict && (
                 <div className="text-sm text-[var(--muted)] mt-1">
@@ -284,7 +255,10 @@ export function ResultCard({
       {/* summary от бэка пока не показываем — он дублирует список markers */}
 
       {text && result.verdict === "ai" && (
-        <TextHighlights text={text} markers={explanation?.top_markers ?? []} />
+        <TextHighlights
+          text={text}
+          matchedPhrases={explanation?.matched_phrases}
+        />
       )}
 
       {result.warnings.length > 0 && (
@@ -329,8 +303,13 @@ function Field({ label, value }: { label: string; value: string }) {
  */
 function ProbabilityScale({ prob }: { prob: number }) {
   const pct = Math.max(0, Math.min(1, prob)) * 100;
+  const zone = pct < 30 ? "вероятно человек" : pct < 70 ? "ручная проверка" : "вероятно AI";
   return (
-    <div className="px-4 pt-4 pb-5 border-b border-[var(--border)]">
+    <div
+      className="px-4 pt-4 pb-5 border-b border-[var(--border)]"
+      role="img"
+      aria-label={`Вероятность AI: ${pct.toFixed(1)}%, зона: ${zone}`}
+    >
       <div className="flex items-baseline justify-between mb-2 text-xs">
         <span className="uppercase tracking-wider text-[var(--muted)]">
           Шкала вероятности AI
@@ -341,7 +320,7 @@ function ProbabilityScale({ prob }: { prob: number }) {
       </div>
 
       {/* Шкала: 30%/40%/30% — LOW/MEDIUM/HIGH (совпадает с порогами каскада) */}
-      <div className="relative h-3 rounded-full overflow-hidden flex">
+      <div className="relative h-3 rounded-full overflow-hidden flex" aria-hidden>
         <div className="bg-green-500/70" style={{ width: "30%" }} />
         <div className="bg-amber-400/70" style={{ width: "40%" }} />
         <div className="bg-red-500/70" style={{ width: "30%" }} />

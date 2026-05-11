@@ -254,29 +254,21 @@ class TestAIMarkers:
     def feats(self):
         return extract_all(AI_LIKE).iloc[0]
 
-    def test_fw_является_detected(self, feats):
-        assert feats["fw_является"] > 0.0
-
-    def test_fw_однако_detected(self, feats):
-        assert feats["fw_однако"] > 0.0
-
-    def test_fw_например_detected(self, feats):
-        assert feats["fw_например"] > 0.0
-
-    def test_fw_ключевой_detected(self, feats):
-        assert feats["fw_ключевой"] > 0.0
-
-    def test_fw_значительный_detected(self, feats):
-        assert feats["fw_значительный"] > 0.0
-
-    def test_fw_существенный_detected(self, feats):
-        assert feats["fw_существенный"] > 0.0
-
-    def test_fw_контекст_detected(self, feats):
-        assert feats["fw_контекст"] > 0.0
-
-    def test_fw_аспект_detected(self, feats):
-        assert feats["fw_аспект"] > 0.0
+    @pytest.mark.parametrize(
+        "word",
+        [
+            "является",
+            "однако",
+            "например",
+            "ключевой",
+            "значительный",
+            "существенный",
+            "контекст",
+            "аспект",
+        ],
+    )
+    def test_fw_marker_detected(self, feats, word):
+        assert feats[f"fw_{word}"] > 0.0
 
     def test_ends_formulaic(self, feats):
         assert feats["ends_formulaic"] == 1

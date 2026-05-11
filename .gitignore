@@ -29,6 +29,8 @@ latex/
 scripts/deploy/docker-compose.prod.yml
 scripts/deploy/*.rendered.*
 scripts/deploy/*.local.*
+# Локальные публичные SSH-ключи
+scripts/deploy/.local/
 
 # ===== Python =====
 __pycache__/

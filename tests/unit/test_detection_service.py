@@ -11,7 +11,7 @@ import pytest
 
 from app.cache import DetectionCache
 from app.config import Settings
-from app.detectors.base import BaseDetector
+from app.detectors.base import BaseDetector, DetectionResult
 from app.preprocessing.pipeline import TextPreprocessor
 from app.schemas import (
     RiskLevel,
@@ -99,6 +99,27 @@ class TestRunDetectionHappyPath:
         assert outcome.response.risk_level == RiskLevel.medium
         assert WarningCode.low_confidence in outcome.response.warnings
 
+    @pytest.mark.parametrize(
+        "prob_ai, expected_verdict, expected_risk",
+        [
+            (0.0, Verdict.human, RiskLevel.low),
+            (0.4999, Verdict.human, RiskLevel.medium),
+            (0.5, Verdict.ai, RiskLevel.medium),
+            (1.0, Verdict.ai, RiskLevel.high),
+        ],
+        ids=["zero", "just_below_threshold", "exact_threshold", "one"],
+    )
+    async def test_verdict_threshold_boundaries(
+        self, prob_ai, expected_verdict, expected_risk
+    ):
+        ctx = _make_ctx(detector=FakeDetector(prob_ai=prob_ai))
+        outcome = await run_detection(
+            ctx, "Длинный текст для анализа.", request_id=_REQUEST_ID
+        )
+
+        assert outcome.response.verdict == expected_verdict
+        assert outcome.response.risk_level == expected_risk
+
 
 # ── No-decision / truncation ─────────────────────────────────
 
@@ -177,9 +198,7 @@ class TestRunDetectionCalibration:
         assert WarningCode.calibration_unavailable in outcome.response.warnings
 
     async def test_calibrator_failure_logs_warning_with_traceback(self, caplog):
-        """PR-55: при сбое калибровки должна остаться запись WARNING со stack trace
-        и request_id, чтобы на проде можно было разобрать причину через journald/Sentry.
-        """
+        """Сбой калибровки должен оставить WARNING с request_id в extra и stack trace."""
 
         class FailingCalibrator:
             def calibrate(self, prob_ai, method):
@@ -198,8 +217,8 @@ class TestRunDetectionCalibration:
             if r.name == "app.services.detection" and r.levelname == "WARNING"
         ]
         assert matching, "ожидался WARNING-лог о падении калибровки"
-        assert "Calibration failed" in matching[0].getMessage()
-        assert _REQUEST_ID in matching[0].getMessage()
+        assert matching[0].getMessage() == "calibration_failed"
+        assert getattr(matching[0], "request_id", None) == _REQUEST_ID
         # exc_info=True сохраняет тройку (type, value, traceback) в record.exc_info.
         assert matching[0].exc_info is not None
 

@@ -33,7 +33,10 @@ export default function BatchPage() {
   const [error, setError] = useState<string | null>(null);
   const [batch, setBatch] = useState<BatchStatusResponse | null>(null);
 
+  // Recursive setTimeout: следующий тик стартует только после возврата
+  // предыдущего, иначе на slow network копились бы параллельные запросы.
   const pollRef = useRef<number | null>(null);
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (!authLoading && !user) router.replace("/login");
@@ -41,7 +44,8 @@ export default function BatchPage() {
 
   useEffect(() => {
     return () => {
-      if (pollRef.current) window.clearInterval(pollRef.current);
+      cancelledRef.current = true;
+      if (pollRef.current) window.clearTimeout(pollRef.current);
     };
   }, []);
 
@@ -80,26 +84,38 @@ export default function BatchPage() {
   }
 
   function clearPolling() {
+    cancelledRef.current = true;
     if (pollRef.current) {
-      window.clearInterval(pollRef.current);
+      window.clearTimeout(pollRef.current);
       pollRef.current = null;
     }
   }
 
-  async function pollStatus(batchId: string) {
+  async function pollLoop(batchId: string) {
+    if (cancelledRef.current) return;
+    let shouldContinue = true;
     try {
       const s = await apiEndpoints.getBatchStatus(batchId);
+      if (cancelledRef.current) return;
       setBatch(s);
       if (s.status === "COMPLETED") {
         setStage("completed");
-        clearPolling();
+        shouldContinue = false;
       }
     } catch (e) {
+      if (cancelledRef.current) return;
       if (e instanceof ApiError && e.status === 404) {
         setError("Batch не найден");
-        clearPolling();
         setStage("error");
+        shouldContinue = false;
       }
+      // Прочие ошибки (transient network / 5xx) — продолжаем тикать.
+    }
+    if (shouldContinue && !cancelledRef.current) {
+      pollRef.current = window.setTimeout(
+        () => void pollLoop(batchId),
+        POLL_INTERVAL_MS,
+      );
     }
   }
 
@@ -112,11 +128,9 @@ export default function BatchPage() {
     try {
       const created = await apiEndpoints.createBatch(file, detectorType, explain);
       setStage("processing");
-      // Сразу подтягиваем стартовый статус, без ожидания первого тика.
-      await pollStatus(created.batch_id);
-      pollRef.current = window.setInterval(() => {
-        void pollStatus(created.batch_id);
-      }, POLL_INTERVAL_MS);
+      cancelledRef.current = false;
+      // Стартовый тик: подтягиваем первый статус и рекурсивно планируем следующие.
+      void pollLoop(created.batch_id);
     } catch (e) {
       setStage("error");
       if (e instanceof ApiError) {

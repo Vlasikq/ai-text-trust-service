@@ -26,7 +26,6 @@ from math import log2
 import numpy as np
 import pandas as pd
 
-
 FORMULAIC_RE = re.compile(
     r"в заключение|таким образом|подводя итог|в целом,?\s|резюмируя|итак,",
     re.IGNORECASE,

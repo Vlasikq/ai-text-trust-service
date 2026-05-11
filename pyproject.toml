@@ -1,6 +1,6 @@
 [project]
 name = "ai-text-trust-service"
-version = "0.3.0"
+version = "0.4.0"
 description = "Сервис для определения текстов, сгенерированных ИИ"
 license = "MIT"
 requires-python = ">=3.11"
@@ -37,6 +37,9 @@ dependencies = [
     "python-docx>=1.2.0",
     "pypdf>=5.0.0",
     "chardet>=5.2.0",
+    # FastAPI Form/File — для /api/v1/extract; transitive у starlette,
+    # но требует ≥0.0.27, чтобы закрыть CVE-2026-40347 и CVE-2026-42561.
+    "python-multipart>=0.0.27",
     # Artifact sync (тот же образ используется контейнером artifact-sync в проде)
     "boto3>=1.43.4",
 ]

@@ -1,31 +1,79 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import {
   apiEndpoints,
   ApiError,
   type AnalyzeResponse,
   type JobStatusResponse,
+  type RiskLevel,
   type SegmentScoringResponse,
+  type Verdict,
 } from "@/lib/api";
+import { VERDICT_LABEL_SHORT, verdictDotClass } from "@/lib/labels";
 import { ResultCard } from "./ResultCard";
 import { SegmentedText } from "./SegmentedText";
 import demoSamples from "@/lib/demo-samples.json";
 
-/** Сессионная история анализов (только клиент, localStorage). */
+// Сессионная история анализов в localStorage. Полный текст не сохраняем —
+// храним короткий preview, чтобы PII не оседал в браузере.
 interface SessionEntry {
-  id: string; // crypto.randomUUID()
-  text: string;
+  id: string;
+  preview: string;
   result: AnalyzeResponse;
-  timestamp: number; // Date.now()
+  timestamp: number;
 }
 
-const SESSION_KEY = "aitrust:session_history";
+// Старый ключ хранил полный текст пользователя — мигрируем и удаляем.
+const SESSION_KEY_V1 = "aitrust:session_history";
+const SESSION_KEY = "aitrust:session:v2";
 const SESSION_MAX = 8;
+const PREVIEW_LEN = 120;
+
+interface LegacyEntryV1 {
+  id?: string;
+  text?: string;
+  result?: AnalyzeResponse;
+  timestamp?: number;
+}
+
+function makePreview(text: string): string {
+  if (text.length <= PREVIEW_LEN) return text;
+  return text.slice(0, PREVIEW_LEN).trimEnd() + "…";
+}
+
+function migrateLegacy(): SessionEntry[] | null {
+  const raw = localStorage.getItem(SESSION_KEY_V1);
+  if (!raw) return null;
+  localStorage.removeItem(SESSION_KEY_V1);
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (e: unknown): e is LegacyEntryV1 =>
+          typeof e === "object" && e !== null && "result" in e,
+      )
+      .map((e): SessionEntry => ({
+        id: e.id ?? `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+        preview: makePreview(e.text ?? ""),
+        result: e.result as AnalyzeResponse,
+        timestamp: e.timestamp ?? Date.now(),
+      }))
+      .slice(0, SESSION_MAX);
+  } catch {
+    return [];
+  }
+}
 
 function loadSession(): SessionEntry[] {
   if (typeof window === "undefined") return [];
   try {
+    const migrated = migrateLegacy();
+    if (migrated && migrated.length > 0) {
+      saveSession(migrated);
+      return migrated;
+    }
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
@@ -35,12 +83,47 @@ function loadSession(): SessionEntry[] {
   }
 }
 
+// Кэш + подписчики: useSyncExternalStore требует стабильный snapshot между
+// вызовами getSnapshot, поэтому держим один массив и инвалидируем при write.
+let sessionCache: SessionEntry[] | null = null;
+const sessionListeners = new Set<() => void>();
+const EMPTY_SESSION: SessionEntry[] = [];
+
+function getSessionSnapshot(): SessionEntry[] {
+  if (sessionCache === null) sessionCache = loadSession();
+  return sessionCache;
+}
+
+function getServerSessionSnapshot(): SessionEntry[] {
+  return EMPTY_SESSION;
+}
+
+function subscribeSession(cb: () => void): () => void {
+  sessionListeners.add(cb);
+  const onStorage = (e: StorageEvent) => {
+    if (e.key === SESSION_KEY || e.key === SESSION_KEY_V1) {
+      sessionCache = null;
+      cb();
+    }
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    sessionListeners.delete(cb);
+    window.removeEventListener("storage", onStorage);
+  };
+}
+
 function saveSession(entries: SessionEntry[]) {
   if (typeof window === "undefined") return;
+  const next = entries.slice(0, SESSION_MAX);
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(entries.slice(0, SESSION_MAX)));
+    localStorage.setItem(SESSION_KEY, JSON.stringify(next));
+    sessionCache = next;
+    for (const l of sessionListeners) l();
   } catch {
-    /* quota exceeded — игнорируем, история — best-effort */
+    /* quota exceeded — пишем только в кэш, чтобы UI не расходился */
+    sessionCache = next;
+    for (const l of sessionListeners) l();
   }
 }
 
@@ -87,42 +170,34 @@ export function AnalyzeForm() {
   const [dragOver, setDragOver] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<{ name: string; format: string } | null>(null);
-  // Сессионная история (последние SESSION_MAX анализов в localStorage).
-  const [session, setSession] = useState<SessionEntry[]>([]);
+  // Сессионная история — external store вокруг localStorage. На SSR пустой,
+  // на клиенте подтягивается без hydration mismatch (useSyncExternalStore).
+  const session = useSyncExternalStore(
+    subscribeSession,
+    getSessionSnapshot,
+    getServerSessionSnapshot,
+  );
   // id текущего показанного анализа из истории (null = только что выполненный).
   const [activeId, setActiveId] = useState<string | null>(null);
   // Чтобы быстро отменять polling при размонтировании / новом сабмите.
   const submitTokenRef = useRef(0);
 
-  // Загружаем сессию из localStorage при mount (SSR-safe: localStorage только в браузере).
-  useEffect(() => {
-    const loaded = loadSession();
-    if (loaded.length > 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSession(loaded);
-    }
-  }, []);
-
   function pushToSession(entry: SessionEntry) {
-    setSession((prev) => {
-      const next = [entry, ...prev].slice(0, SESSION_MAX);
-      saveSession(next);
-      return next;
-    });
+    saveSession([entry, ...session]);
   }
 
   function selectFromSession(id: string) {
     const entry = session.find((e) => e.id === id);
     if (!entry) return;
     setResult(entry.result);
-    setAnalyzedText(entry.text);
-    setText(entry.text);
+    // Полного текста в истории нет (приватность) — подсветка не рендерится.
+    setAnalyzedText("");
+    setSegments(null);
     setActiveId(id);
     setError(null);
   }
 
   function clearSession() {
-    setSession([]);
     saveSession([]);
     setActiveId(null);
   }
@@ -190,7 +265,7 @@ export function AnalyzeForm() {
             typeof crypto !== "undefined" && "randomUUID" in crypto
               ? crypto.randomUUID()
               : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
-          text,
+          preview: makePreview(text),
           result: r,
           timestamp: Date.now(),
         };
@@ -327,6 +402,9 @@ export function AnalyzeForm() {
               }}
               placeholder={`Вставьте русскоязычный текст (${MIN_CHARS}–${MAX_CHARS} символов) или перетащите TXT/DOCX/PDF...`}
               rows={10}
+              aria-label="Текст для анализа"
+              aria-describedby="analyze-text-counter"
+              aria-invalid={tooLong || undefined}
               className="w-full px-3 py-2 rounded-md border border-[var(--border)] bg-[var(--background)] focus:outline-none focus:ring-2 focus:ring-[var(--primary)] resize-y font-mono text-sm"
             />
             {dragOver && (
@@ -359,6 +437,7 @@ export function AnalyzeForm() {
           )}
           <div className="flex items-center justify-between text-xs mt-1">
             <span
+              id="analyze-text-counter"
               className={`${
                 tooShort
                   ? "text-[var(--warn)]"
@@ -498,10 +577,10 @@ function SessionHistoryTabs({
           const isActive = entry.id === activeId;
           const verdict = entry.result.verdict;
           const risk = entry.result.risk_level;
-          const preview =
-            entry.text.length > 36
-              ? entry.text.slice(0, 36).trim() + "…"
-              : entry.text;
+          const shortPreview =
+            entry.preview.length > 36
+              ? entry.preview.slice(0, 36).trim() + "…"
+              : entry.preview;
 
           return (
             <button
@@ -513,12 +592,12 @@ function SessionHistoryTabs({
                   ? "bg-[var(--background)] border-[var(--primary)] shadow-sm"
                   : "bg-[var(--background)]/60 border-[var(--border)] hover:border-[var(--primary)]/60"
               }`}
-              title={entry.text.slice(0, 200)}
+              title={entry.preview}
             >
               <div className="flex items-center gap-1.5 mb-1">
                 <VerdictDot verdict={verdict} risk={risk} />
                 <span className="font-semibold">
-                  {verdict === "ai" ? "ИИ" : verdict === "human" ? "Человек" : "—"}
+                  {verdict ? VERDICT_LABEL_SHORT[verdict] : "—"}
                 </span>
                 <span className="text-[var(--muted)] font-mono">
                   {entry.result.confidence !== null
@@ -530,7 +609,7 @@ function SessionHistoryTabs({
                 </span>
               </div>
               <div className="truncate text-[var(--muted)] font-normal">
-                {preview}
+                {shortPreview}
               </div>
             </button>
           );
@@ -544,16 +623,15 @@ function VerdictDot({
   verdict,
   risk,
 }: {
-  verdict: "ai" | "human" | null | undefined;
-  risk: string | null | undefined;
+  verdict: Verdict | null | undefined;
+  risk: RiskLevel | null | undefined;
 }) {
-  let cls = "bg-gray-400";
-  if (risk === "HIGH") cls = "bg-red-500";
-  else if (risk === "MEDIUM") cls = "bg-amber-500";
-  else if (risk === "LOW") cls = "bg-green-500";
-  else if (verdict === "ai") cls = "bg-red-500";
-  else if (verdict === "human") cls = "bg-green-500";
-  return <span className={`inline-block w-2 h-2 rounded-full ${cls}`} aria-hidden />;
+  return (
+    <span
+      className={`inline-block w-2 h-2 rounded-full ${verdictDotClass(verdict, risk)}`}
+      aria-hidden
+    />
+  );
 }
 
 function formatRelative(ts: number): string {

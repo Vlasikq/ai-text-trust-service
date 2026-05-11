@@ -1,17 +1,16 @@
 #cloud-config
 # Рендерится через scripts/deploy/render_cloud_init.py.
 
-# Debug SSH-доступ к VM. Ключ сгенерирован локально (~/.ssh/aitrust_yc),
-# приватная часть только на машине разработчика. Используется при отладке cloud-init —
-# `ssh -i ~/.ssh/aitrust_yc ubuntu@<VM_IP>` даёт доступ к docker logs / docker ps -a.
-# В прод-окружении эту секцию удалить.
+# Debug SSH-доступ к VM. Публичные ключи подставляются render_cloud_init.py
+# из scripts/deploy/.local/ssh_authorized_keys. 
+# В YC активирован OS Login, поэтому даже без этих ключей доступ к VM остаётся через Serial Console.
 users:
   - default
   - name: ubuntu
     sudo: ALL=(ALL) NOPASSWD:ALL
     shell: /bin/bash
     ssh_authorized_keys:
-      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdM2GB44FG1DriCHsLMNqPeqKIQH5WU/YQ6byMcw45q aitrust-yc-debug
+__SSH_AUTHORIZED_KEYS__
 
 package_update: true
 package_upgrade: false

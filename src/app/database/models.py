@@ -18,6 +18,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -333,7 +334,12 @@ class User(Base):
             "role IN ('user', 'admin')",
             name="ck_users_role",
         ),
-        Index("ix_users_email", "email", unique=True),
+        # Expression-index по lower(email) — case-insensitive uniqueness.
+        Index(
+            "ix_users_email_lower",
+            text("lower(email)"),
+            unique=True,
+        ),
     )
 
 

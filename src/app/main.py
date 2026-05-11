@@ -12,10 +12,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.cache import DetectionCache
 from app.calibration.platt import ProbabilityCalibrator
-from app.config import DetectorType, Settings, get_settings
-from app.detectors.cascade import CascadeDetector
-from app.detectors.tfidf import TFIDFDetector
-from app.detectors.transformer import TransformerDetector
+from app.config import Settings, get_settings
+from app.detectors.factory import build_detector
 from app.explanation.markers import StyleExplainer
 from app.logging_config import setup_logging
 from app.middleware.metrics import RequestLoggingMiddleware, metrics_endpoint
@@ -32,40 +30,6 @@ from app.routers.jobs import router as jobs_router
 from app.routers.me import router as me_router
 
 log = logging.getLogger(__name__)
-
-
-def _build_detector(settings: Settings):
-    tfidf = TFIDFDetector(settings.artifacts_dir)
-
-    if settings.detector_type == DetectorType.tfidf:
-        tfidf.load()
-        return tfidf
-
-    if not settings.transformer_dir.exists():
-        log.warning("Transformer dir not found: %s", settings.transformer_dir)
-        if settings.detector_type == DetectorType.transformer:
-            raise FileNotFoundError(
-                f"Transformer required but not found: {settings.transformer_dir}"
-            )
-        # Каскад без трансформера: возвращаем TF-IDF без медленного пути.
-        tfidf.load()
-        cascade = CascadeDetector(fast=tfidf, slow=None)
-        return cascade
-
-    transformer = TransformerDetector(settings.transformer_dir)
-
-    if settings.detector_type == DetectorType.transformer:
-        transformer.load()
-        return transformer
-
-    cascade = CascadeDetector(
-        fast=tfidf,
-        slow=transformer,
-        cascade_lo=settings.cascade_lo,
-        cascade_hi=settings.cascade_hi,
-    )
-    cascade.load()
-    return cascade
 
 
 async def _init_database(app: FastAPI, settings: Settings) -> None:
@@ -119,7 +83,7 @@ async def lifespan(app: FastAPI):
     # Складываем компоненты в app.state — отсюда их берут зависимости роутеров.
     app.state.settings = settings
     app.state.preprocessor = TextPreprocessor(settings)
-    app.state.detector = _build_detector(settings)
+    app.state.detector = build_detector(settings)
 
     app.state.cache = DetectionCache(maxsize=settings.cache_maxsize)
 
@@ -190,11 +154,12 @@ def create_app() -> FastAPI:
     )
 
     # slowapi: обработчик 429 и app.state.limiter для декораторов в роутерах.
-    from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
+    from app.middleware.ratelimit import rate_limit_exceeded_handler
+
     app.state.limiter = limiter
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
     # CORS_ORIGINS — список через запятую из ENV. Пустая строка означает same-origin.
     # Пример для PWA на Vercel: "https://<app>.vercel.app,https://aitrust.example.ru".

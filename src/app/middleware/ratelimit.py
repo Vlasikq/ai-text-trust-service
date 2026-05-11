@@ -11,8 +11,10 @@
 from __future__ import annotations
 
 from fastapi import Request
-from slowapi import Limiter
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
+from starlette.responses import Response
 
 from app.middleware.forwarded import client_ip
 
@@ -41,3 +43,13 @@ def _key_func(request: Request) -> str:
 # Singleton лимитер; storage by default in-memory (per-process).
 # Для multi-worker будущего: переделать на redis storage_uri="redis://...".
 limiter = Limiter(key_func=_key_func, default_limits=[])
+
+
+def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> Response:
+    """slowapi-handler с добавленным Retry-After: стандартный handler ставит
+    только X-RateLimit-*, клиенты часто опираются именно на Retry-After.
+    """
+    resp = _rate_limit_exceeded_handler(request, exc)
+    retry = getattr(exc, "retry_after", None) or 60
+    resp.headers["Retry-After"] = str(int(retry))
+    return resp

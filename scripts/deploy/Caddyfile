@@ -8,29 +8,65 @@
 # Same-origin: PWA и API на одном домене → нет CORS, refresh-cookie SameSite=Strict.
 
 __DOMAIN__ {
-    # Defense-in-depth: стираем любой клиентский X-Forwarded-For до проксирования.
-    # Caddy в reverse_proxy сам выставит правильное значение (client IP в конце цепочки).
-    # Бэкенд берёт последний элемент XFF → подделать его невозможно.
-    request_header -X-Forwarded-For
+	# Defense-in-depth: стираем любой клиентский X-Forwarded-For до проксирования.
+	# Caddy в reverse_proxy сам выставит правильное значение (client IP в конце цепочки).
+	# Бэкенд берёт последний элемент XFF → подделать его невозможно.
+	request_header -X-Forwarded-For
 
-    # Explicit allow-list путей FastAPI. Всё неперечисленное идёт в Next.js
-    # (включая статику /_next/*, /icon-*.png, /manifest.webmanifest).
-    @api path /api/* /auth/* /me /me/* /health /ready /metrics /docs /openapi.json /redoc
-    handle @api {
-        reverse_proxy api:8000
-    }
+	# Security headers (применяются ко всем ответам, в т.ч. PWA).
+	# 'unsafe-inline' в style-src — обязательно для Tailwind v4; в script-src —
+	# для Next.js hydration. 'unsafe-eval' — для recharts.
+	header {
+		# preload не используем: HSTS preload-list — lock-in на год через браузеры,
+		# при потере TLS-сертификата восстановиться нельзя. Добавлять только на
+		# постоянный домен со зрелым TLS-pipeline.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
 
-    # Default: Next.js (PWA).
-    handle {
-        reverse_proxy web:3000
-    }
+	# Отрезаем гигантские тела на edge, до FastAPI. У /api/v1/extract и /batch
+	# свои лимиты на уровне приложения — это второй уровень.
+	request_body {
+		max_size 5MB
+	}
 
-    # Healthchecks без логов, чтобы не засорять Cloud Logging.
-    @probes path /health /ready
-    log_skip @probes
+	# Compression — gzip и zstd для всех текстовых ответов (HTML/JSON/CSS/JS).
+	encode gzip zstd
 
-    log {
-        output stdout
-        format json
-    }
+	# /ready и /metrics светят версии — наружу не отдаём. Внутренний docker-bridge
+	# (healthcheck контейнера) и localhost (SSH-отладка) остаются: private_ranges =
+	# 10/8, 172.16/12, 192.168/16, 127.0.0.0/8. Блок должен идти ДО @api.
+	@management_external {
+		path /ready /metrics
+		not remote_ip private_ranges
+	}
+	handle @management_external {
+		respond "Not Found" 404
+	}
+
+	# Explicit allow-list путей FastAPI. Всё неперечисленное идёт в Next.js
+	# (включая статику /_next/*, /icon-*.png, /manifest.webmanifest).
+	@api path /api/* /auth/* /me /me/* /health /ready /metrics /docs /openapi.json /redoc
+	handle @api {
+		reverse_proxy api:8000
+	}
+
+	# Default: Next.js (PWA).
+	handle {
+		reverse_proxy web:3000
+	}
+
+	# Healthchecks без логов, чтобы не засорять Cloud Logging.
+	@probes path /health /ready
+	log_skip @probes
+
+	log {
+		output stdout
+		format json
+	}
 }

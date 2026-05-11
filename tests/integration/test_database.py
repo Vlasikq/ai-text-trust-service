@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 from uuid_utils import uuid7
 
 from app.database.models import Analysis, Feedback, ModelDeployment
@@ -180,7 +181,7 @@ class TestAnalysis:
             requested_at=datetime.now(timezone.utc),
         )
         db_session.add(a2)
-        with pytest.raises(Exception):  # IntegrityError
+        with pytest.raises(IntegrityError):
             await db_session.flush()
 
 

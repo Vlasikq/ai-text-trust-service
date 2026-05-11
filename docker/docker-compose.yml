@@ -8,7 +8,7 @@ services:
     environment:
       DATABASE_URL: "postgresql+asyncpg://aitrust:aitrust@db:5432/aitrust"
       DETECTOR_TYPE: "tfidf"
-      SERVICE_VERSION: "0.1.0"
+      # SERVICE_VERSION резолвится Settings из pyproject.toml.
       MODEL_VERSION: "ru-detector-0.1.0"
       MIN_CHARS: "300"
       MAX_CHARS: "8000"
@@ -24,6 +24,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 3
+      # alembic upgrade + warmup детектора ~10-20с — даём запас перед unhealthy.
+      start_period: 30s
 
   db:
     image: postgres:16-alpine

@@ -163,6 +163,9 @@ export interface AnalyzeResponse {
       direction: "above" | "below";
     }>;
     summary: string;
+    // Бэк отдаёт список шаблонных оборотов из текста. Может отсутствовать
+    // у старых записей из истории — фронт fallback'ает на свой словарь.
+    matched_phrases?: string[];
   } | null;
 }
 

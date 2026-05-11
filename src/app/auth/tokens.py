@@ -13,9 +13,21 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from jwt.exceptions import InvalidTokenError
 
+# Whitelist симметричных алгоритмов — отсекаем «alg: none» и asymmetric-confusion
+# до того, как параметр дойдёт до PyJWT.
+_ALLOWED_ALGORITHMS = frozenset({"HS256", "HS384", "HS512"})
+
 
 class TokenError(Exception):
     """Невалидный / просроченный токен."""
+
+
+def _check_algorithm(algorithm: str) -> None:
+    if algorithm not in _ALLOWED_ALGORITHMS:
+        raise TokenError(
+            f"unsupported algorithm: {algorithm!r} "
+            f"(allowed: {sorted(_ALLOWED_ALGORITHMS)})"
+        )
 
 
 @dataclass(frozen=True)
@@ -42,6 +54,7 @@ def create_access_token(
     ttl_minutes: int = 15,
 ) -> str:
     """Подписать access-JWT с claims (sub, role, iss, aud, exp, iat)."""
+    _check_algorithm(algorithm)
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
@@ -64,6 +77,7 @@ def decode_access_token(
     algorithm: str = "HS256",
 ) -> JWTPayload:
     """Проверить подпись + срок + iss/aud + тип. Бросает TokenError на любой ошибке."""
+    _check_algorithm(algorithm)
     try:
         claims = jwt.decode(
             token,

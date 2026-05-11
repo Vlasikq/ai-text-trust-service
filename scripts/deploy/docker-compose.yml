@@ -15,10 +15,8 @@ services:
       LOG_LEVEL: "INFO"
       LOG_TEXT: "false"
       DB_FALLBACK_LOG_PATH: "/app/logs/db_fallback.jsonl"
-      # Версия — единый источник правды на стороне deploy. Должна совпадать с
-      # тегом образа `aitrust-api:<version>` (Settings.service_version) и main.py
-      # (FastAPI(version=...)). См. SECURITY review «D»: тройной рассинхрон.
-      SERVICE_VERSION: "0.3.2"
+      # SERVICE_VERSION резолвится Settings из pyproject.toml — переопределяем
+      # здесь только если нужен hotfix-тег, отличный от версии пакета.
       MODEL_VERSION: "ru-detector-0.1.0"
       # Включает fail-fast в lifespan если JWT_SECRET остался дефолтным.
       IS_PRODUCTION: "true"
@@ -51,7 +49,6 @@ services:
       DETECTOR_TYPE: "cascade"
       LOG_LEVEL: "INFO"
       LOG_TEXT: "false"
-      SERVICE_VERSION: "0.3.2"
       MODEL_VERSION: "ru-detector-0.1.0"
       IS_PRODUCTION: "true"
     restart: unless-stopped

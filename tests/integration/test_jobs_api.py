@@ -17,7 +17,6 @@ from app.database.models import AnalysisJob, JobStatus
 from tests.conftest import make_test_app
 
 
-
 def _fake_job(status: str = JobStatus.PENDING, **overrides) -> AnalysisJob:
     """Build AnalysisJob, готовый для возврата из мокнутого репозитория."""
     job = AnalysisJob(

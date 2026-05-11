@@ -245,11 +245,9 @@ async def _load_owned_batch(request: Request, batch_id: str, user: User) -> Batc
         raise HTTPException(status_code=404, detail="Batch not found")
 
     async with UnitOfWork() as uow:
-        b = (
-            await uow.session.execute(select(BatchJob).where(BatchJob.id == bid))
-        ).scalar_one_or_none()
+        b = await uow.batches.get_owned(bid, UUID(str(user.id)))
 
-    if b is None or str(b.user_id) != str(user.id):
+    if b is None:
         raise HTTPException(status_code=404, detail="Batch not found")
     return b
 
