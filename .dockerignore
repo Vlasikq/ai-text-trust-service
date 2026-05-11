@@ -1,0 +1,17 @@
+.venv/
+.git/
+.ruff_cache/
+.pytest_cache/
+__pycache__/
+data/
+notebooks/
+tmp_kaggle/
+*.egg-info/
+.env
+логи.txt
+
+# Артефакты: всё исключаем кроме service/ (TF-IDF + calibration + baselines, ~2.5 MB).
+# Трансформер (~1.4 GB) в prod-образ не кладём — для cascade-режима подсасывается с S3.
+artifacts/*
+!artifacts/service/
+!artifacts/service/**

@@ -6,9 +6,40 @@ services:
     ports:
       - "8000:8000"
     environment:
+      DATABASE_URL: "postgresql+asyncpg://aitrust:aitrust@db:5432/aitrust"
+      DETECTOR_TYPE: "tfidf"
       SERVICE_VERSION: "0.1.0"
       MODEL_VERSION: "ru-detector-0.1.0"
       MIN_CHARS: "300"
       MAX_CHARS: "8000"
       RISK_THRESH_LOW: "0.30"
       RISK_THRESH_HIGH: "0.70"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../artifacts:/app/artifacts:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: aitrust
+      POSTGRES_PASSWORD: aitrust
+      POSTGRES_DB: aitrust
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aitrust"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

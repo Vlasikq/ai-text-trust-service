@@ -1,0 +1,14 @@
+node_modules
+.next
+.env*
+!.env.example
+*.log
+README.md
+.git
+.gitignore
+.dockerignore
+Dockerfile
+.eslintrc*
+eslint.config.*
+.vscode
+.idea

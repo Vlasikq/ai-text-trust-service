@@ -8,14 +8,13 @@
 
 Pipeline (оба режима):
   1. Загрузка human / AI / adversarial
-  2. strip_markdown + нормализация whitespace (DEC-001)
+  2. strip_markdown + нормализация whitespace
   3. Дедупликация (SHA-256)
-  4. Фильтрация по длине, truncate длинных по границе предложения (DEC-007)
-  5. Holdout unseen generator (DEC-004 / DEC-009)
+  4. Фильтрация по длине, truncate длинных по границе предложения
+  5. Holdout unseen generator
   6. Per-domain балансировка
   7. Stratified split (topic-aware или по human_doc_id)
   8. Adversarial -> только test
-
 """
 
 import argparse
@@ -27,7 +26,7 @@ import statistics
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from text_cleaning import clean_text, truncate_by_sentence
+from app.preprocessing.text_cleaning import clean_text, truncate_by_sentence
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -47,7 +46,6 @@ HUMAN_SOURCES = [
 ]
 
 
-# clean_text и truncate_by_sentence импортированы из text_cleaning.py
 def iter_jsonl(path: Path):
     with path.open("r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -140,7 +138,7 @@ def load_adversarial() -> list[dict]:
         for row in iter_jsonl(fpath):
             rows.append({
                 "text": row["text"],
-                "label": 1,  # adversarial = AI (DEC-001: конвертация из legacy int)
+                "label": 1,  # adversarial = AI
                 "domain": row.get("domain", "unknown"),
                 "source_model": "adversarial",
                 "source_name": row.get("source_name", "unknown"),
@@ -202,7 +200,7 @@ def filter_by_length(data: list[dict], min_chars: int, max_chars: int, name: str
     return result
 
 
-# ── split logic (DEC-003, DEC-004) ──────────────────────────────
+# ── split logic ─────────────────────────────────────────────────
 
 
 def make_splits(
@@ -219,7 +217,7 @@ def make_splits(
     main_human = list(human)
     main_ai = list(ai)
 
-    # 1. Holdout unseen generator (DEC-004)
+    # 1. Holdout unseen generator
     if holdout_model:
         holdout_ai = [r for r in ai if r["source_model"] == holdout_model]
         main_ai = [r for r in ai if r["source_model"] != holdout_model]
@@ -260,8 +258,7 @@ def make_splits(
         balanced.extend(h)
         balanced.extend(a)
 
-    # 3. Topic-aware stratified split (DEC-003)
-    # Группируем по (domain, label, topic)
+    # 3. Topic-aware stratified split: группируем по (domain, label, topic).
     # AI: topic из meta. Human: каждый текст — своя "группа" (random split)
     topic_groups = defaultdict(list)  # (domain, label, topic) → [rows]
     for r in balanced:
@@ -327,7 +324,7 @@ def make_splits_topic_matched(
     test_size: float = 0.15,
     val_size: float = 0.10,
 ) -> dict[str, list[dict]]:
-    """Сборка splits для topic-matched данных (DEC-008, DEC-009).
+    """Сборка splits для topic-matched данных.
 
     Split по human_doc_id: если human X в train, все AI-пары X тоже в train.
     Holdout = Qwen3 (unseen generator).
@@ -335,7 +332,7 @@ def make_splits_topic_matched(
     rng = random.Random(SEED)
     splits = {}
 
-    # 1. Holdout: отделяем unseen generator (DEC-009)
+    # 1. Holdout: отделяем unseen generator
     holdout_ai = [r for r in ai_tm if r["source_model"] == holdout_model]
     main_ai = [r for r in ai_tm if r["source_model"] != holdout_model]
     log.info(f"Topic-matched AI: main={len(main_ai)}, holdout ({holdout_model})={len(holdout_ai)}")
@@ -563,7 +560,7 @@ def main() -> int:
         log.info(f"Raw: human={len(human)}, AI={len(ai)}, "
                  f"adversarial={len(adversarial)}")
 
-    # очистка (DEC-001)
+    # очистка
     if not args.no_clean:
         log.info("Очистка текстов (strip_markdown + normalize)...")
         human = apply_cleaning(human, "human")
@@ -576,7 +573,7 @@ def main() -> int:
     ai = deduplicate(ai, "AI")
     adversarial = deduplicate(adversarial, "adversarial")
 
-    # фильтрация по длине (DEC-007)
+    # фильтрация по длине
     log.info("Фильтрация по длине...")
     human = filter_by_length(human, args.min_chars, args.max_chars, "human")
     ai = filter_by_length(ai, args.min_chars, args.max_chars, "AI")

@@ -1,0 +1,43 @@
+#cloud-config
+# Рендерится через scripts/deploy/render_cloud_init.py.
+
+# Debug SSH-доступ к VM. Ключ сгенерирован локально (~/.ssh/aitrust_yc),
+# приватная часть только на машине разработчика. Используется при отладке cloud-init —
+# `ssh -i ~/.ssh/aitrust_yc ubuntu@<VM_IP>` даёт доступ к docker logs / docker ps -a.
+# В прод-окружении эту секцию удалить.
+users:
+  - default
+  - name: ubuntu
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDdM2GB44FG1DriCHsLMNqPeqKIQH5WU/YQ6byMcw45q aitrust-yc-debug
+
+package_update: true
+package_upgrade: false
+packages:
+  - docker.io
+  - docker-compose-v2
+  - ca-certificates
+  - curl
+  - jq
+  - postgresql-client
+
+write_files:
+  - path: /opt/aitrust/Caddyfile
+    permissions: '0644'
+    content: |
+__CADDYFILE_CONTENT__
+
+  - path: /opt/aitrust/docker-compose.yml
+    permissions: '0644'
+    content: |
+__COMPOSE_CONTENT__
+
+  - path: /opt/aitrust/bootstrap.sh
+    permissions: '0755'
+    content: |
+__BOOTSTRAP_CONTENT__
+
+runcmd:
+  - bash /opt/aitrust/bootstrap.sh

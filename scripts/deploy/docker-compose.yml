@@ -1,0 +1,114 @@
+# Production docker-compose для одной Compute VM в YC.
+# Кладётся в /opt/aitrust/ через cloud-init и стартует одним docker compose up -d.
+# Image-tag, DATABASE_URL, JWT_SECRET и CORS_ORIGINS заполняются render-скриптом
+# (см. scripts/deploy/render_cloud_init.py) перед встраиванием в cloud-init.
+# Caddy читает $DOMAIN из /opt/aitrust/.env (созданного bootstrap.sh) и автоматически
+# выпускает Let's Encrypt сертификат для <VM_IP>.sslip.io.
+
+services:
+  api:
+    image: __IMAGE__
+    container_name: aitrust-api
+    environment:
+      DATABASE_URL: "__DATABASE_URL__"
+      DETECTOR_TYPE: "cascade"
+      LOG_LEVEL: "INFO"
+      LOG_TEXT: "false"
+      DB_FALLBACK_LOG_PATH: "/app/logs/db_fallback.jsonl"
+      # Версия — единый источник правды на стороне deploy. Должна совпадать с
+      # тегом образа `aitrust-api:<version>` (Settings.service_version) и main.py
+      # (FastAPI(version=...)). См. SECURITY review «D»: тройной рассинхрон.
+      SERVICE_VERSION: "0.3.2"
+      MODEL_VERSION: "ru-detector-0.1.0"
+      # Включает fail-fast в lifespan если JWT_SECRET остался дефолтным.
+      IS_PRODUCTION: "true"
+      JWT_SECRET: "__JWT_SECRET__"
+      CORS_ORIGINS: "__CORS_ORIGINS__"
+    restart: unless-stopped
+    volumes:
+      - api-logs:/app/logs
+      - transformer-artifacts:/app/artifacts/transformer:ro
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Lifespan грузит детекторы + alembic upgrade head — даём 60 сек до
+      # первой проверки, иначе контейнер фликает в unhealthy при холодном старте.
+      start_period: 60s
+    depends_on:
+      artifact-sync:
+        condition: service_completed_successfully
+
+  worker:
+    image: __IMAGE__
+    container_name: aitrust-worker
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: "__DATABASE_URL__"
+      DETECTOR_TYPE: "cascade"
+      LOG_LEVEL: "INFO"
+      LOG_TEXT: "false"
+      SERVICE_VERSION: "0.3.2"
+      MODEL_VERSION: "ru-detector-0.1.0"
+      IS_PRODUCTION: "true"
+    restart: unless-stopped
+    volumes:
+      - transformer-artifacts:/app/artifacts/transformer:ro
+    depends_on:
+      artifact-sync:
+        condition: service_completed_successfully
+
+  # One-shot: подсасывает трансформер 1.4 GB из YC Object Storage (public-read) в
+  # shared volume перед стартом api/worker. Запускается от root, потому что
+  # named volume по умолчанию owned by root:root и appuser (uid=1000) не может
+  # создать папки. Файлы читаются api/worker как 0644, доступ через "other".
+  artifact-sync:
+    image: __IMAGE__
+    container_name: aitrust-artifact-sync
+    user: "0:0"
+    command: ["python", "/app/scripts/sync_artifacts.py", "--bucket", "aitrust-artifacts", "--prefix", "transformer/model", "--dst", "/app/artifacts/transformer/model"]
+    volumes:
+      - transformer-artifacts:/app/artifacts/transformer
+    restart: "no"
+
+  web:
+    image: __WEB_IMAGE__
+    container_name: aitrust-web
+    environment:
+      NODE_ENV: "production"
+      # Same-origin: пустая строка → fetch на тот же origin (через Caddy).
+      NEXT_PUBLIC_API_URL: ""
+    restart: unless-stopped
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: aitrust-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN}"
+    volumes:
+      - /opt/aitrust/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+
+volumes:
+  api-logs:
+  caddy-data:
+  caddy-config:
+  transformer-artifacts:

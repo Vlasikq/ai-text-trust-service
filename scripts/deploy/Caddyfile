@@ -1,0 +1,36 @@
+# Caddy конфиг — TLS автоматически от Let's Encrypt.
+# Домен подставляется render-скриптом (см. scripts/deploy/render_cloud_init.py).
+#
+# Маршрутизация:
+#   - API endpoints (REST + Swagger) → api:8000 (FastAPI)
+#   - Всё остальное → web:3000 (Next.js PWA, standalone-output)
+#
+# Same-origin: PWA и API на одном домене → нет CORS, refresh-cookie SameSite=Strict.
+
+__DOMAIN__ {
+    # Defense-in-depth: стираем любой клиентский X-Forwarded-For до проксирования.
+    # Caddy в reverse_proxy сам выставит правильное значение (client IP в конце цепочки).
+    # Бэкенд берёт последний элемент XFF → подделать его невозможно.
+    request_header -X-Forwarded-For
+
+    # Explicit allow-list путей FastAPI. Всё неперечисленное идёт в Next.js
+    # (включая статику /_next/*, /icon-*.png, /manifest.webmanifest).
+    @api path /api/* /auth/* /me /me/* /health /ready /metrics /docs /openapi.json /redoc
+    handle @api {
+        reverse_proxy api:8000
+    }
+
+    # Default: Next.js (PWA).
+    handle {
+        reverse_proxy web:3000
+    }
+
+    # Healthchecks без логов, чтобы не засорять Cloud Logging.
+    @probes path /health /ready
+    log_skip @probes
+
+    log {
+        output stdout
+        format json
+    }
+}
