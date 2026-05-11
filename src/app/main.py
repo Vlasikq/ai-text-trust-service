@@ -106,31 +106,13 @@ async def _init_database(app: FastAPI, settings: Settings) -> None:
         log.warning("Database not available — persistence disabled", exc_info=True)
 
 
-_DEFAULT_JWT_SECRET_PREFIX = "dev-only-secret"
-
-
-def _validate_settings_for_prod(settings: Settings) -> None:
-    """Отказывает в старте, если в проде остались дефолтные секреты.
-
-    Так отлавливается частая ошибка «забыл переопределить JWT_SECRET через ENV».
-    Без этой проверки access-токены легко подделать, потому что дефолт открыт в коде.
-    На локальной разработке (`is_production=false`) проверка пропускается.
-    """
-    if not settings.is_production:
-        return
-    if settings.jwt_secret.startswith(_DEFAULT_JWT_SECRET_PREFIX):
-        raise RuntimeError(
-            "JWT_SECRET не переопределён в production-окружении — "
-            "отказ старта. Задайте ENV `JWT_SECRET=<random 32+ bytes>`."
-        )
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Settings валидирует JWT_SECRET / DB host / CORS при создании;
+    # если что-то не так — ValueError бросается из get_settings() и API не стартует.
     settings = get_settings()
 
     setup_logging(settings.log_level)
-    _validate_settings_for_prod(settings)
 
     log.info("Starting AI Text Trust Service v%s", settings.service_version)
 

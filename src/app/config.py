@@ -6,11 +6,20 @@
 from enum import Enum
 from functools import lru_cache
 from pathlib import Path
+from typing import Self
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings
 
 from app.schemas import DEFAULT_DISCLAIMER
+
+# JWT_SECRET с этим префиксом считается дефолтным dev-секретом — в prod запрещён.
+# Префикс вынесен сюда, чтобы валидатор Settings ловил его до bootstrap'а воркера,
+# а не только в lifespan API.
+_DEFAULT_JWT_SECRET_PREFIX = "dev-only-secret"
+
+# Признаки локального DSN: prod-инстанс к localhost подключаться не должен.
+_LOCAL_DB_HOSTS = ("localhost", "127.0.0.1", "::1")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -122,6 +131,36 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8",
         "extra": "ignore",
     }
+
+    @model_validator(mode="after")
+    def _check_prod_invariants(self) -> Self:
+        """Прод-инварианты по 12-factor: ловим конфиг-ошибки при создании Settings,
+        до lifespan. Иначе воркер (worker.py) стартует с дефолтным JWT_SECRET,
+        потому что валидация раньше жила только в FastAPI lifespan.
+        """
+        if not self.is_production:
+            return self
+
+        errors: list[str] = []
+
+        if self.jwt_secret.startswith(_DEFAULT_JWT_SECRET_PREFIX):
+            errors.append(
+                "JWT_SECRET остался дефолтным dev-значением — задайте 32+ случайных байт"
+            )
+
+        if any(host in self.database_url for host in _LOCAL_DB_HOSTS):
+            errors.append("DATABASE_URL указывает на localhost в production")
+
+        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+        if "*" in origins:
+            errors.append("CORS_ORIGINS='*' недопустим с allow_credentials=True")
+        for origin in origins:
+            if origin.startswith("http://"):
+                errors.append(f"CORS_ORIGINS содержит http:// origin без TLS: {origin}")
+
+        if errors:
+            raise ValueError("Production config rejected: " + "; ".join(errors))
+        return self
 
 
 @lru_cache(maxsize=1)

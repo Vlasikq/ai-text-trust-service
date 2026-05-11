@@ -144,21 +144,16 @@ Async-задачи — единственное место, где текст в
 
 ## Защитные проверки в проде
 
-### Жёсткая проверка `JWT_SECRET` при старте
+### Прод-инварианты валидируются при создании `Settings`
 
-В [src/app/main.py:115-128](src/app/main.py#L115-L128):
+В [src/app/config.py](src/app/config.py) `@model_validator(mode="after")` отказывает при `IS_PRODUCTION=true`, если:
 
-```python
-def _validate_settings_for_prod(settings: Settings) -> None:
-    if not settings.is_production:
-        return
-    if settings.jwt_secret.startswith(_DEFAULT_JWT_SECRET_PREFIX):
-        raise RuntimeError(
-            "JWT_SECRET не переопределён в production-окружении — отказ старта."
-        )
-```
+- `JWT_SECRET` остался с префиксом `dev-only-secret`;
+- `DATABASE_URL` указывает на `localhost` / `127.0.0.1`;
+- `CORS_ORIGINS="*"` (несовместимо с `allow_credentials=True` — CSRF);
+- любой origin в `CORS_ORIGINS` идёт без TLS (`http://...`).
 
-В проде с дефолтным секретом сервис не поднимется, и не будет тихой деградации с подделываемыми токенами. На локальной разработке (`IS_PRODUCTION=false`) проверка пропускается.
+Валидация на уровне `Settings`, а не FastAPI lifespan, нужна потому, что воркер (`src/app/worker.py`) 
 
 ### Версионирование
 

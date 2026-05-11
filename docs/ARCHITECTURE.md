@@ -159,7 +159,7 @@ Batch-режим (загрузка CSV) устроен похоже:
 Точка входа — `@asynccontextmanager async def lifespan(app)` в [src/app/main.py:131](src/app/main.py#L131). Инициализация идёт строго в таком порядке:
 
 1. `setup_logging(LOG_LEVEL)` подключает JSON-форматтер и `ContextVar` для `correlation_id`.
-2. `_validate_settings_for_prod` отказывает в старте, если `IS_PRODUCTION=true`, а `JWT_SECRET` остался дефолтным.
+2. Прод-инварианты (`JWT_SECRET`, `DATABASE_URL`, `CORS_ORIGINS`) проверяет `@model_validator` в `Settings` — раньше lifespan, поэтому покрывает и `worker.py`. 
 3. `app.state.preprocessor = TextPreprocessor(settings)`.
 4. `app.state.detector = _build_detector(settings)` собирает TF-IDF, трансформер или каскад — подробности в `DETECTORS.md`.
 5. `app.state.cache = DetectionCache(maxsize=...)`.

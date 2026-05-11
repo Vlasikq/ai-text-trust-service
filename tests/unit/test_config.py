@@ -1,8 +1,13 @@
-"""Tests for app.config — Settings defaults and overrides."""
+"""Tests for app.config — Settings defaults, overrides and prod invariants."""
 
 import pytest
+from pydantic import ValidationError
 
 from app.config import DetectorType, Settings, get_settings
+
+
+_PROD_JWT_OK = "x" * 48  # 48 hex chars — реалистичный JWT_SECRET после ротации
+_PROD_DB_OK = "postgresql+asyncpg://aitrust:pw@db.internal:5432/aitrust"
 
 
 class TestSettingsDefaults:
@@ -104,3 +109,64 @@ class TestGetSettings:
     def test_returns_settings_instance(self):
         s = get_settings()
         assert isinstance(s, Settings)
+
+
+class TestSettingsProdInvariants:
+    """Прод-инварианты валидируются при создании Settings, не в lifespan.
+
+    Иначе worker.py (отдельный entrypoint) мог стартовать с дефолтным JWT_SECRET.
+    """
+
+    def test_dev_mode_skips_all_checks(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "false")
+        s = Settings(_env_file=None)
+        assert s.jwt_secret.startswith("dev-only-secret")
+
+    def test_prod_with_default_jwt_secret_fails(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("DATABASE_URL", _PROD_DB_OK)
+        monkeypatch.setenv("CORS_ORIGINS", "https://aitrust.example.ru")
+        with pytest.raises(ValidationError, match="JWT_SECRET"):
+            Settings(_env_file=None)
+
+    def test_prod_with_localhost_db_fails(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("JWT_SECRET", _PROD_JWT_OK)
+        monkeypatch.setenv(
+            "DATABASE_URL", "postgresql+asyncpg://aitrust:pw@localhost:5432/aitrust"
+        )
+        with pytest.raises(ValidationError, match="localhost"):
+            Settings(_env_file=None)
+
+    def test_prod_with_wildcard_cors_fails(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("JWT_SECRET", _PROD_JWT_OK)
+        monkeypatch.setenv("DATABASE_URL", _PROD_DB_OK)
+        monkeypatch.setenv("CORS_ORIGINS", "*")
+        with pytest.raises(ValidationError, match=r"CORS_ORIGINS='\*'"):
+            Settings(_env_file=None)
+
+    def test_prod_with_plaintext_http_origin_fails(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("JWT_SECRET", _PROD_JWT_OK)
+        monkeypatch.setenv("DATABASE_URL", _PROD_DB_OK)
+        monkeypatch.setenv("CORS_ORIGINS", "http://aitrust.example.ru,https://ok.example.ru")
+        with pytest.raises(ValidationError, match="http://"):
+            Settings(_env_file=None)
+
+    def test_prod_with_valid_config_passes(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("JWT_SECRET", _PROD_JWT_OK)
+        monkeypatch.setenv("DATABASE_URL", _PROD_DB_OK)
+        monkeypatch.setenv("CORS_ORIGINS", "https://aitrust.example.ru,https://app.example.ru")
+        s = Settings(_env_file=None)
+        assert s.is_production is True
+        assert s.jwt_secret == _PROD_JWT_OK
+
+    def test_prod_empty_cors_passes(self, monkeypatch):
+        monkeypatch.setenv("IS_PRODUCTION", "true")
+        monkeypatch.setenv("JWT_SECRET", _PROD_JWT_OK)
+        monkeypatch.setenv("DATABASE_URL", _PROD_DB_OK)
+        monkeypatch.setenv("CORS_ORIGINS", "")
+        s = Settings(_env_file=None)
+        assert s.cors_origins == ""
