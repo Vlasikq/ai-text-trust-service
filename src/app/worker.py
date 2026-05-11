@@ -98,6 +98,9 @@ def _build_context(settings: Settings) -> DetectionContext:
         if not explainer.is_ready():
             explainer = None
     except Exception:
+        # Без exc_info оператор видел бы только «explainer = None» и не понимал,
+        # что упало: отсутствующий baselines.json, mismatched schema или OOM.
+        log.warning("Explainer load failed in worker context, continuing without it", exc_info=True)
         explainer = None
 
     return DetectionContext(

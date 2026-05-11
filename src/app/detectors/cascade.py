@@ -9,6 +9,7 @@
 """
 
 import logging
+from dataclasses import replace
 
 from app.detectors.base import BaseDetector, DetectionResult
 from app.schemas import WarningCode
@@ -42,20 +43,34 @@ class CascadeDetector(BaseDetector):
         fast_result = self._fast.predict(text)
 
         if fast_result.prob_ai <= self._cascade_lo or fast_result.prob_ai >= self._cascade_hi:
-            fast_result.metadata["cascade_path"] = "fast"
-            return fast_result
+            return replace(
+                fast_result,
+                metadata={**fast_result.metadata, "cascade_path": "fast"},
+            )
 
         if self._slow is not None and self._slow.is_ready():
             slow_result = self._slow.predict(text)
-            slow_result.inference_ms += fast_result.inference_ms
-            slow_result.metadata["cascade_path"] = "slow"
-            slow_result.metadata["fast_prob"] = fast_result.prob_ai
-            return slow_result
+            # Не мутируем slow_result — детектор может вернуть закешированный объект,
+            # и его metadata неожиданно поменялась бы у параллельного вызова.
+            return replace(
+                slow_result,
+                inference_ms=slow_result.inference_ms + fast_result.inference_ms,
+                metadata={
+                    **slow_result.metadata,
+                    "cascade_path": "slow",
+                    "fast_prob": fast_result.prob_ai,
+                },
+            )
 
         # Трансформер недоступен: возвращаем результат TF-IDF и помечаем запасной путь.
-        fast_result.metadata["cascade_path"] = "fallback"
-        fast_result.metadata["warning"] = WarningCode.transformer_unavailable.value
-        return fast_result
+        return replace(
+            fast_result,
+            metadata={
+                **fast_result.metadata,
+                "cascade_path": "fallback",
+                "warning": WarningCode.transformer_unavailable.value,
+            },
+        )
 
     def is_ready(self) -> bool:
         return self._fast.is_ready()

@@ -4,6 +4,7 @@ Background persistence — write analysis results to DB without blocking respons
 On DB failure: write JSON to fallback log (zero data loss).
 """
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -74,7 +75,9 @@ async def persist_with_fallback(
             analysis.request_id,
             str(e),
         )
-        _write_fallback(analysis, fallback_path)
+        # Синхронный open()+write() в async-таске блокировал бы event loop
+        # на медленном диске (или на полной FS); уносим в отдельный поток.
+        await asyncio.to_thread(_write_fallback, analysis, fallback_path)
 
 
 def _write_fallback(analysis: Analysis, path: Path) -> None:

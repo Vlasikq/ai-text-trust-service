@@ -1,8 +1,10 @@
 """
 In-memory LRU cache for detection results.
 
-SHA-256 of normalized text → DetectionResult.
-Repeat request with the same text → 0 ms inference.
+Ключ — `{model_version}:{sha256(text)}`. При смене артефакта (новый model_version)
+старые записи не отдаются: иначе после reload модель v2 возвращала бы prob_ai,
+посчитанный моделью v1, и калибровка с verdict разъехались бы со свежим артефактом.
+В БД хранится «чистый» `text_hash(text)` — там дедупликация по тексту, не по версии.
 """
 
 import hashlib
@@ -12,8 +14,12 @@ from app.detectors.base import DetectionResult
 
 
 def text_hash(text: str) -> str:
-    """SHA-256 hash of text. Shared by cache and persist."""
+    """SHA-256 текста. Используется для дедупликации в БД (persist)."""
     return hashlib.sha256(text.encode()).hexdigest()
+
+
+def _cache_key(text: str, model_version: str) -> str:
+    return f"{model_version}:{text_hash(text)}"
 
 
 class DetectionCache:
@@ -23,8 +29,8 @@ class DetectionCache:
         self._hits = 0
         self._misses = 0
 
-    def get(self, text: str) -> DetectionResult | None:
-        key = text_hash(text)
+    def get(self, text: str, model_version: str) -> DetectionResult | None:
+        key = _cache_key(text, model_version)
         result = self._cache.get(key)
         if result is not None:
             self._hits += 1
@@ -33,8 +39,8 @@ class DetectionCache:
         self._misses += 1
         return None
 
-    def put(self, text: str, result: DetectionResult) -> None:
-        key = text_hash(text)
+    def put(self, text: str, result: DetectionResult, model_version: str) -> None:
+        key = _cache_key(text, model_version)
         self._cache[key] = result
         self._cache.move_to_end(key)
         if len(self._cache) > self._maxsize:

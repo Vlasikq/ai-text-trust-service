@@ -80,8 +80,13 @@ class ProbabilityCalibrator:
         if cal is None:
             return prob_ai
 
-        # Platt scaling: LogReg.predict_proba on log-odds
-        logit = np.log(max(prob_ai, 1e-10) / max(1 - prob_ai, 1e-10))
+        # Platt scaling: LogReg.predict_proba on log-odds.
+        # Clip обоих концов до [1e-4, 1-1e-4]: иначе при prob≈1.0 logit ≈ +23,
+        # LogReg выдаёт нестабильную крайнюю вероятность и калибровка дребезжит
+        # на пограничных текстах. Защита от деления на ноль (max(.., 1e-10))
+        # этот случай не покрывала.
+        clipped = float(np.clip(prob_ai, 1e-4, 1 - 1e-4))
+        logit = np.log(clipped / (1 - clipped))
         calibrated = float(cal.predict_proba(np.array([[logit]]))[0, 1])
         return calibrated
 

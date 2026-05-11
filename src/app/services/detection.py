@@ -113,8 +113,12 @@ async def run_detection(
         return DetectionOutcome(response=response, detection=None, preprocessing=prep, cached_hit=False)
 
     # 2. Кеш.
+    # Ключ включает model_version: при смене артефакта старые записи не отдаются,
+    # иначе калибровка и verdict разъехались бы с актуальной моделью.
     cached_hit = False
-    result: DetectionResult | None = ctx.cache.get(prep.text) if ctx.cache else None
+    result: DetectionResult | None = (
+        ctx.cache.get(prep.text, ctx.settings.model_version) if ctx.cache else None
+    )
     if result is not None:
         cached_hit = True
     else:
@@ -141,7 +145,7 @@ async def run_detection(
             return DetectionOutcome(response=response, detection=None, preprocessing=prep, cached_hit=False)
 
         if ctx.cache:
-            ctx.cache.put(prep.text, result)
+            ctx.cache.put(prep.text, result, ctx.settings.model_version)
 
     # Если каскад уронил трансформер и сработал запасной путь, прокидываем предупреждение.
     cascade_warning = result.metadata.get("warning")
@@ -167,10 +171,13 @@ async def run_detection(
         warnings.append(WarningCode.low_confidence)
 
     # 5. Объяснение (опционально, дороже по времени).
+    # extract_all() считает 45 стилометрических фич и берёт 50-100 мс CPU.
+    # В sync-вызове из event loop это блокировало бы все параллельные запросы,
+    # поэтому уносим в отдельный поток.
     explanation = None
     if explain and ctx.explainer is not None:
         try:
-            explanation = ctx.explainer.explain(prep.text)
+            explanation = await asyncio.to_thread(ctx.explainer.explain, prep.text)
             if explanation is not None:
                 warnings.append(WarningCode.style_explanation_heuristic)
         except Exception:

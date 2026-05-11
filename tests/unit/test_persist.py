@@ -1,8 +1,10 @@
 """Tests for database.persist — fallback log and response_to_model."""
 
 import json
+import threading
 from unittest.mock import patch
 
+from app.database import persist as persist_module
 from app.database.models import Analysis
 from app.database.persist import _write_fallback, persist_with_fallback, response_to_model
 from app.schemas import (
@@ -215,3 +217,39 @@ class TestPersistWithFallback:
             await persist_with_fallback(analysis, log_path)
 
         assert not log_path.exists()
+
+    async def test_fallback_offloaded_to_thread(self, tmp_path):
+        """_write_fallback вызывается через asyncio.to_thread — не из event-loop thread'а.
+
+        Свойство «не блокирует loop» проверяем по факту переключения потока, а не
+        по таймингам: иначе тест дребезжит на медленном CI.
+        """
+        main_thread = threading.current_thread()
+        captured: dict = {}
+        original_write = persist_module._write_fallback
+
+        def capturing_write(analysis, path):
+            captured["thread"] = threading.current_thread()
+            original_write(analysis, path)
+
+        analysis = response_to_model(
+            response=_make_response(),
+            cleaned_text="Текст.",
+            detector_method="tfidf",
+            cascade_path="fast",
+            inference_ms=12.0,
+            cached=False,
+            model_version="v1",
+            service_version="0.1.0",
+        )
+        log_path = tmp_path / "fallback.jsonl"
+
+        with patch("app.database.persist.UnitOfWork", _FailingUoW), patch(
+            "app.database.persist._write_fallback", capturing_write
+        ):
+            await persist_with_fallback(analysis, log_path)
+
+        assert captured["thread"] is not main_thread, (
+            "_write_fallback должен вызываться из worker-thread'а, не из event loop"
+        )
+        assert log_path.exists()

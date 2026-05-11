@@ -18,11 +18,14 @@ load_dotenv(".env.local", override=True)  # личные secrets перекры�
 
 config = context.config
 
-# Override sqlalchemy.url from environment
-db_url = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://aitrust:aitrust@localhost:5432/aitrust",
-)
+# DATABASE_URL обязателен. Прежний дефолт `aitrust:aitrust@localhost` молча
+# увёл бы прод-миграцию на локальный кластер, если оператор забыл проставить env.
+db_url = os.getenv("DATABASE_URL")
+if not db_url:
+    raise RuntimeError(
+        "DATABASE_URL не задан. alembic не запустится без явного DSN — "
+        "укажите в .env / .env.local или передайте через окружение."
+    )
 config.set_main_option("sqlalchemy.url", db_url)
 
 if config.config_file_name is not None:
