@@ -202,7 +202,7 @@ uv run alembic upgrade head      # применить локально
 
 | ENV | Dev (.env.example) | Prod | Зачем |
 |---|---|---|---|
-| `SERVICE_VERSION` | `0.3.0` | равен тегу образа | попадает в `/health`, Swagger, `Analysis.service_version` |
+| `SERVICE_VERSION` | из `pyproject.toml` | равен тегу образа | попадает в `/health`, Swagger, `Analysis.service_version` |
 | `IS_PRODUCTION` | `false` | `true` | включает жёсткие проверки в lifespan |
 | `DETECTOR_TYPE` | `tfidf` | `cascade` | гибрид TF-IDF и трансформера |
 | `JWT_SECRET` | дефолтный | случайные 32+ байт | подписывает access-токены; с дефолтом сервис не стартует, если `IS_PRODUCTION=true` |
@@ -228,7 +228,7 @@ livenessProbe:
 ```json
 {
   "status": "ready",
-  "service_version": "0.3.2",
+  "service_version": "0.4.0",
   "model_version": "ru-detector-0.1.0",
   "components": {
     "detector": {"ready": true, "info": {...}},

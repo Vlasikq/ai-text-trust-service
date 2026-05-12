@@ -5,7 +5,7 @@ Usage:
     uv run python scripts/deploy/render_compose_prod.py \\
         --reg-id crpqbj2rjnrhcsfpes38 \\
         --pg-host rc1a-c8tcvredf5pdg33o.mdb.yandexcloud.net \\
-        --tag 0.3.0 --web-tag 0.1.0 \\
+        --tag 0.4.0 --web-tag 0.2.0 \\
         --cors-origins ""
 """
 

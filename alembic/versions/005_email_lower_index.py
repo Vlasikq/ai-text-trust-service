@@ -1,4 +1,10 @@
-"""005 case-insensitive uniqueness для users.email."""
+"""005 case-insensitive uniqueness для users.email.
+
+CONCURRENTLY: на пустой users эффекта нет, на проде с растущей таблицей
+ACCESS EXCLUSIVE заменяется на SHARE UPDATE EXCLUSIVE — логины не блокируются
+на время перестройки индекса. autocommit_block обязателен: CONCURRENTLY не
+работает внутри транзакции.
+"""
 
 
 from alembic import op
@@ -10,12 +16,18 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.drop_index("ix_users_email", table_name="users")
-    op.execute(
-        "CREATE UNIQUE INDEX ix_users_email_lower ON users (lower(email))"
-    )
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_email")
+        op.execute(
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "
+            "ix_users_email_lower ON users (lower(email))"
+        )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_users_email_lower", table_name="users")
-    op.create_index("ix_users_email", "users", ["email"], unique=True)
+    with op.get_context().autocommit_block():
+        op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_users_email_lower")
+        op.execute(
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "
+            "ix_users_email ON users (email)"
+        )

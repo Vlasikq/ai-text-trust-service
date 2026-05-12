@@ -61,9 +61,10 @@ class Settings(BaseSettings):
     # (например, hotfix-build без bump'а версии).
     service_version: str = Field(default_factory=_resolve_service_version)
     model_version: str = "ru-detector-0.1.0"
-    # В проде включается через ENV IS_PRODUCTION=true.
-    # При is_production=true lifespan не стартует с дефолтным JWT_SECRET.
-    is_production: bool = False
+    # Дефолт True — fail-closed: забытая переменная не должна тихо отключить
+    # prod-инварианты. Локалка и тесты явно ставят IS_PRODUCTION=false
+    # (см. .env.example и tests/conftest.py).
+    is_production: bool = True
 
     # Детектор. По умолчанию TF-IDF — на holdout он часто устойчивее каскада.
     # Каскад включается через DETECTOR_TYPE=cascade.

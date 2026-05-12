@@ -15,7 +15,8 @@ __DOMAIN__ {
 
 	# Security headers (применяются ко всем ответам, в т.ч. PWA).
 	# 'unsafe-inline' в style-src — обязательно для Tailwind v4; в script-src —
-	# для Next.js hydration. 'unsafe-eval' — для recharts.
+	# для Next.js hydration (известный долг, закрывается nonce-CSP через middleware).
+	# 'unsafe-eval' не нужен: recharts@3 рендерит SVG без eval, других eval-зависимостей нет.
 	header {
 		# preload не используем: HSTS preload-list — lock-in на год через браузеры,
 		# при потере TLS-сертификата восстановиться нельзя. Добавлять только на
@@ -25,7 +26,7 @@ __DOMAIN__ {
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "geolocation=(), microphone=(), camera=(), payment=()"
-		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
 		-Server
 	}
 

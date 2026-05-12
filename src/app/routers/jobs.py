@@ -89,8 +89,17 @@ async def create_job(
 
 @router.get("/jobs/{job_id}", response_model=JobStatusResponse)
 @limiter.limit(lambda: get_settings().rate_limit_me)
-async def get_job(job_id: str, request: Request) -> JobStatusResponse:
-    """Статус job-а. Если SUCCESS — подгружаем `Analysis` и возвращаем `AnalyzeResponse`."""
+async def get_job(
+    job_id: str,
+    request: Request,
+    current_user: User | None = Depends(get_current_user_optional),
+) -> JobStatusResponse:
+    """Статус job-а. Если SUCCESS — подгружаем `Analysis` и возвращаем `AnalyzeResponse`.
+
+    Анонимный job (user_id=None) виден любому по UUID: иначе анонимный клиент
+    не сможет забрать свой результат. Авторский job — только владельцу; чужие
+    и несуществующие отдаются как 404, чтобы не палить факт существования.
+    """
     db_enabled = getattr(request.app.state, "db_enabled", False)
     if not db_enabled:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -98,6 +107,11 @@ async def get_job(job_id: str, request: Request) -> JobStatusResponse:
     async with UnitOfWork() as uow:
         job = await uow.jobs.get_by_id(job_id)
         if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        if job.user_id is not None and (
+            current_user is None or str(current_user.id) != str(job.user_id)
+        ):
             raise HTTPException(status_code=404, detail="Job not found")
 
         result_payload: AnalyzeResponse | None = None

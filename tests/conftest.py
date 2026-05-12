@@ -45,6 +45,11 @@ from app.schemas import Explanation, StyleMarker
 limiter.enabled = False
 
 
+# Дефолт Settings.is_production=True (fail-closed) — для тестов перекрываем
+# на dev. Тесты прод-инвариантов сами monkeypatch'ат "true" и откатывают.
+os.environ["IS_PRODUCTION"] = "false"
+
+
 # ── Detect DB availability ────────────────────────────────────
 
 

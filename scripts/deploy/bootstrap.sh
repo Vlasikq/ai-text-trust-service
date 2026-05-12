@@ -44,7 +44,7 @@ cd /opt/aitrust && docker compose up -d \
 # 6. Smoke внутри VM (alembic + warmup + Caddy ACME ~60-90s).
 for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 15
-  if curl -fsS --max-time 5 http://localhost:8000/health >/dev/null 2>&1; then
+  if curl -fsS --max-time 5 http://localhost:8000/ready >/dev/null 2>&1; then
     echo "==> api healthy after ${i} attempts"
     break
   fi

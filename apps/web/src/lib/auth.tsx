@@ -16,6 +16,7 @@ import {
   subscribeAccess,
   type UserPublic,
 } from "@/lib/api";
+import { clearSessionHistory } from "@/components/AnalyzeForm";
 
 interface AuthState {
   user: UserPublic | null;
@@ -98,6 +99,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setAccessToken(null);
     setRefreshToken(null);
+    clearSessionHistory();
     setUser(null);
   }, []);
 

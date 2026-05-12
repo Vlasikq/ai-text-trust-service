@@ -127,6 +127,19 @@ function saveSession(entries: SessionEntry[]) {
   }
 }
 
+// На shared-устройстве превью текстов не должны пережить выход пользователя.
+export function clearSessionHistory(): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(SESSION_KEY_V1);
+  } catch {
+    /* приватный режим без quota — кэш всё равно сбросим */
+  }
+  sessionCache = EMPTY_SESSION;
+  for (const l of sessionListeners) l();
+}
+
 const MIN_CHARS = 300;
 const MAX_CHARS = 8000;
 

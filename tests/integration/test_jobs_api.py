@@ -6,6 +6,7 @@ UnitOfWork здесь мокается через unittest.mock — осозна
 проброс privacy-полей наружу). Real-DB end-to-end проходит через test_batch_api.
 """
 
+import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -13,7 +14,8 @@ import pytest
 from fastapi.testclient import TestClient
 from uuid_utils import uuid7
 
-from app.database.models import AnalysisJob, JobStatus
+from app.auth.dependencies import get_current_user_optional
+from app.database.models import AnalysisJob, JobStatus, User, UserRole, UserStatus
 from tests.conftest import make_test_app
 
 
@@ -153,6 +155,66 @@ class TestGetJob:
         assert data["status"] == "ERROR"
         assert "timeout" in data["error"]
         assert data["result"] is None
+
+    # ── Ownership / BOLA ───────────────────────────────────
+
+    def _make_user(self, **overrides) -> User:
+        return User(
+            id=overrides.pop("id", uuid.uuid4()),
+            email=overrides.pop("email", "u@example.com"),
+            password_hash="$argon2id$dummy",
+            status=UserStatus.ACTIVE,
+            role=UserRole.USER,
+            **overrides,
+        )
+
+    def test_owner_can_read_authored_job(self, mock_uow):
+        owner = self._make_user()
+        job = _fake_job(status=JobStatus.PENDING, user_id=str(owner.id))
+        mock_uow.jobs.get_by_id = AsyncMock(return_value=job)
+
+        app = make_test_app(routers=("jobs",), db_enabled=True)
+        app.dependency_overrides[get_current_user_optional] = lambda: owner
+        try:
+            resp = TestClient(app).get(f"/api/v1/jobs/{job.id}")
+        finally:
+            app.dependency_overrides.pop(get_current_user_optional, None)
+        assert resp.status_code == 200
+        assert resp.json()["job_id"] == str(job.id)
+
+    def test_other_user_gets_404_on_authored_job(self, mock_uow):
+        # Чужой авторский job не должен утечь даже залогиненному пользователю.
+        # 404, а не 403 — иначе утекает факт существования id.
+        owner = self._make_user()
+        intruder = self._make_user(email="x@example.com")
+        job = _fake_job(status=JobStatus.SUCCESS, user_id=str(owner.id))
+        mock_uow.jobs.get_by_id = AsyncMock(return_value=job)
+
+        app = make_test_app(routers=("jobs",), db_enabled=True)
+        app.dependency_overrides[get_current_user_optional] = lambda: intruder
+        try:
+            resp = TestClient(app).get(f"/api/v1/jobs/{job.id}")
+        finally:
+            app.dependency_overrides.pop(get_current_user_optional, None)
+        assert resp.status_code == 404
+
+    def test_anonymous_request_gets_404_on_authored_job(self, mock_uow):
+        job = _fake_job(status=JobStatus.SUCCESS, user_id=str(uuid.uuid4()))
+        mock_uow.jobs.get_by_id = AsyncMock(return_value=job)
+
+        client = TestClient(make_test_app(routers=("jobs",), db_enabled=True))
+        resp = client.get(f"/api/v1/jobs/{job.id}")
+        assert resp.status_code == 404
+
+    def test_anonymous_job_visible_by_uuid(self, mock_uow):
+        # Анонимный клиент знает только UUID — без авторизации он должен
+        # забрать свой же результат.
+        job = _fake_job(status=JobStatus.PENDING, user_id=None)
+        mock_uow.jobs.get_by_id = AsyncMock(return_value=job)
+
+        client = TestClient(make_test_app(routers=("jobs",), db_enabled=True))
+        resp = client.get(f"/api/v1/jobs/{job.id}")
+        assert resp.status_code == 200
 
     def test_returns_result_when_success(self, mock_uow):
         """Когда status=SUCCESS, endpoint подгружает Analysis и возвращает AnalyzeResponse."""
