@@ -14,6 +14,9 @@ services:
       MAX_CHARS: "8000"
       RISK_THRESH_LOW: "0.30"
       RISK_THRESH_HIGH: "0.70"
+      IS_PRODUCTION: "false"
+      JWT_SECRET: "local-dev-jwt-secret-thirty-two-bytes-or-more-for-testing"
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:3001"
     depends_on:
       db:
         condition: service_healthy
@@ -26,6 +29,28 @@ services:
       retries: 3
       # alembic upgrade + warmup детектора ~10-20с — даём запас перед unhealthy.
       start_period: 30s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://aitrust:aitrust@db:5432/aitrust"
+      DETECTOR_TYPE: "tfidf"
+      MODEL_VERSION: "ru-detector-0.1.0"
+      MIN_CHARS: "300"
+      MAX_CHARS: "8000"
+      RISK_THRESH_LOW: "0.30"
+      RISK_THRESH_HIGH: "0.70"
+      IS_PRODUCTION: "false"
+      JWT_SECRET: "local-dev-jwt-secret-thirty-two-bytes-or-more-for-testing"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ../artifacts:/app/artifacts:ro
+    stop_grace_period: 60s
 
   db:
     image: postgres:16-alpine

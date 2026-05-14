@@ -13,7 +13,7 @@
 - **Аутентификация** — JWT HS256 + opaque refresh-rotation, argon2id, slowapi rate-limit. Анонимный режим тоже поддерживается.
 - **Explainability** — `?explain=true` возвращает стилометрические маркеры в сравнении с human-бейзлайном того же домена.
 - **Наблюдаемость** — Prometheus `/metrics`, JSON-логи с `correlation_id`, `/health` и `/ready` для k8s-проб.
-- **PWA-клиент** — Next.js 16 / React 19 в [apps/web/](apps/web/), деплоится same-origin рядом с API.
+- **Web-клиент** — Next.js 16 / React 19 в [apps/web/](apps/web/), installable web app (manifest + standalone), деплоится same-origin рядом с API.
 - **Приватность по умолчанию** — в БД хранится `sha256(text)`, не сам текст; `analyses.user_id` nullable для анонимов.
 
 ## Быстрый старт

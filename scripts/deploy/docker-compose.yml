@@ -51,12 +51,14 @@ services:
       LOG_TEXT: "false"
       MODEL_VERSION: "ru-detector-0.1.0"
       IS_PRODUCTION: "true"
+      JWT_SECRET: "__JWT_SECRET__"
     restart: unless-stopped
     volumes:
       - transformer-artifacts:/app/artifacts/transformer:ro
     depends_on:
       artifact-sync:
         condition: service_completed_successfully
+    stop_grace_period: 60s
 
   # One-shot: подсасывает трансформер 1.4 GB из YC Object Storage (public-read) в
   # shared volume перед стартом api/worker. Запускается от root, потому что

@@ -12,7 +12,7 @@
 | ORM | SQLAlchemy 2 + asyncpg, миграции Alembic |
 | Хранилище | PostgreSQL (managed в YC, локально в Docker) |
 | Очередь | БД-очередь через `FOR UPDATE SKIP LOCKED` (без Redis/RabbitMQ) |
-| Frontend | Next.js 16 (PWA, standalone-output), React 19, Tailwind v4 |
+| Frontend | Next.js 16 (installable web app, output: standalone), React 19, Tailwind v4 |
 | Reverse proxy | Caddy 2 (TLS-автоматизация через Let's Encrypt) |
 | Аутентификация | JWT HS256 (access) + opaque refresh с ротацией |
 | Наблюдаемость | Prometheus + structured JSON logging с correlation_id |

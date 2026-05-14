@@ -1,4 +1,4 @@
-"""Tests for app.schemas — request/response validation."""
+"""Тесты app.schemas — валидация запросов и ответов."""
 
 import pytest
 from pydantic import ValidationError
@@ -9,6 +9,7 @@ from app.schemas import (
     Explanation,
     MethodScore,
     RiskLevel,
+    SegmentScoringRequest,
     Status,
     StyleMarker,
     Verdict,
@@ -163,6 +164,23 @@ class TestMethodScore:
 # ── Enums ─────────────────────────────────────────────────────
 
 
+class TestSegmentScoringRequest:
+    def test_minimal(self):
+        r = SegmentScoringRequest(text="Привет мир")
+        assert r.window_size == 3
+        assert r.step == 2
+
+    def test_max_length_accepted(self):
+        r = SegmentScoringRequest(text="x" * 8_000)
+        assert len(r.text) == 8_000
+
+    def test_above_max_length_rejected(self):
+        # Сегментный скоринг режется жёстче /analyze: каждое окно — отдельный
+        # инференс, 50k chars × cascade = десятки секунд.
+        with pytest.raises(ValidationError):
+            SegmentScoringRequest(text="x" * 8_001)
+
+
 class TestEnums:
     def test_risk_levels(self):
         assert RiskLevel.high.value == "HIGH"
@@ -185,5 +203,6 @@ class TestEnums:
             "CALIBRATION_UNAVAILABLE",
             "INFERENCE_TIMEOUT",
             "STYLE_EXPLANATION_HEURISTIC",
+            "NON_RUSSIAN_TEXT",
         }
         assert set(w.value for w in WarningCode) == expected

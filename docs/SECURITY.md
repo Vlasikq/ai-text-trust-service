@@ -296,7 +296,7 @@ API почти такой же: `jwt.encode(payload, key, algorithm="HS256")` и
 
 План: рассмотреть после защиты, если сервис продолжит жить.
 
-### 8. Async-режим в PWA пока не подключён
+### 8. Async-режим во фронте пока не подключён
 
 Фронт ([apps/web/src/components/AnalyzeForm.tsx](apps/web/src/components/AnalyzeForm.tsx)) ходит синхронно в `POST /api/v1/analyze`. Для каскада в «серой зоне» на CPU ответ может занять 5–15 секунд.
 

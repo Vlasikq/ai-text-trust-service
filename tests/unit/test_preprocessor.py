@@ -1,4 +1,4 @@
-"""Tests for app.preprocessing.pipeline — TextPreprocessor."""
+"""Тесты app.preprocessing.pipeline — TextPreprocessor."""
 
 from app.config import Settings
 from app.preprocessing.pipeline import TextPreprocessor
@@ -85,3 +85,28 @@ class TestEdgeCases:
         result = pp("Текст ```python\nprint('hi')\n``` конец")
         assert "print" not in result.text
         assert "Текст" in result.text
+
+
+class TestLanguageGuard:
+    def test_russian_no_warning(self):
+        pp = _make_preprocessor(min_chars=10)
+        result = pp("Обычный русский текст для проверки языкового стража.")
+        assert WarningCode.non_russian_text not in result.warnings
+
+    def test_english_triggers_warning(self):
+        pp = _make_preprocessor(min_chars=10)
+        result = pp("This is a fully English sentence used to trigger the language guard.")
+        assert WarningCode.non_russian_text in result.warnings
+
+    def test_russian_with_latin_terms_no_warning(self):
+        # Половина и выше кириллицы — порог считаем пройденным.
+        pp = _make_preprocessor(min_chars=10)
+        result = pp("Используем библиотеки FastAPI и PyTorch в сервисе для анализа.")
+        assert WarningCode.non_russian_text not in result.warnings
+
+    def test_short_text_skips_language_check(self):
+        # text_too_short — единственный warning, дальше pipeline не идёт.
+        pp = _make_preprocessor(min_chars=300)
+        result = pp("Short English text.")
+        assert WarningCode.text_too_short in result.warnings
+        assert WarningCode.non_russian_text not in result.warnings

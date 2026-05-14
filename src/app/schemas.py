@@ -44,6 +44,7 @@ class WarningCode(str, Enum):
     calibration_unavailable = "CALIBRATION_UNAVAILABLE"
     inference_timeout = "INFERENCE_TIMEOUT"
     style_explanation_heuristic = "STYLE_EXPLANATION_HEURISTIC"
+    non_russian_text = "NON_RUSSIAN_TEXT"
 
 
 # Запрос на анализ.
@@ -310,7 +311,7 @@ class SegmentSummary(BaseModel):
 
 
 class SegmentScoringRequest(BaseModel):
-    text: str = Field(..., min_length=1, max_length=50_000)
+    text: str = Field(..., min_length=1, max_length=8_000)
     window_size: int = Field(default=3, ge=1, le=10)
     step: int = Field(default=2, ge=1, le=10)
 
