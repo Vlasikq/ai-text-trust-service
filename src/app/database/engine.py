@@ -30,7 +30,7 @@ def init_engine(
     pool_size: int = 5,
     max_overflow: int = 5,
 ) -> AsyncEngine:
-    """Create the global async engine and session factory."""
+    """Создаёт глобальный async-engine и фабрику сессий."""
     global _engine, async_session
 
     _engine = create_async_engine(
@@ -46,14 +46,14 @@ def init_engine(
 
 
 def get_engine() -> AsyncEngine:
-    """Get the current engine (must be initialized first)."""
+    """Возвращает текущий engine (должен быть инициализирован init_engine)."""
     if _engine is None:
         raise RuntimeError("Database engine not initialized. Call init_engine() first.")
     return _engine
 
 
 async def dispose_engine() -> None:
-    """Dispose the engine on shutdown."""
+    """Закрывает engine на shutdown lifespan."""
     global _engine, async_session
     if _engine is not None:
         await _engine.dispose()

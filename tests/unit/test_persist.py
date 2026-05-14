@@ -1,4 +1,4 @@
-"""Tests for database.persist — fallback log and response_to_model."""
+"""Тесты database.persist — fallback-лог и response_to_model."""
 
 import json
 import threading

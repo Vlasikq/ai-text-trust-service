@@ -1,4 +1,4 @@
-"""Tests for database models — schema creation, constraints, JSONB."""
+"""Тесты моделей БД: создание схемы, ограничения, JSONB."""
 
 from datetime import datetime, timezone
 

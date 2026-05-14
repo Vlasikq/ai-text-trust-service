@@ -1,4 +1,4 @@
-"""Tests for detectors: base, tfidf, transformer, cascade."""
+"""Тесты детекторов: base, tfidf, transformer, cascade."""
 
 from app.detectors.base import BaseDetector, DetectionResult
 from app.detectors.cascade import CascadeDetector

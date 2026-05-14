@@ -180,7 +180,7 @@ class JobRepository:
         self._session = session
 
     async def create(self, job: AnalysisJob) -> AnalysisJob:
-        """Insert new job. На UNIQUE-конфликте по request_id возвращает существующий."""
+        """Создаёт новый job. На UNIQUE-конфликте по request_id возвращает существующий."""
         stmt = (
             pg_insert(AnalysisJob)
             .values(

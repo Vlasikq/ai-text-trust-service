@@ -1,4 +1,4 @@
-"""Tests for app.config — Settings defaults, overrides and prod invariants."""
+"""Тесты app.config — Settings, дефолты, оверрайды и прод-инварианты."""
 
 import pytest
 from pydantic import ValidationError

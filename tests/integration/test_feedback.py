@@ -1,4 +1,4 @@
-"""Tests for POST /api/v1/feedback and GET /api/v1/stats endpoints.
+"""Тесты эндпоинтов POST /api/v1/feedback и GET /api/v1/stats.
 
 Используется реальный Postgres через testcontainers / TEST_DATABASE_URL —
 консистентно с test_auth_api.py, test_batch_api.py, test_me_*. /stats требует

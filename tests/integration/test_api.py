@@ -1,7 +1,7 @@
-"""Tests for API endpoint POST /api/v1/analyze.
+"""Тесты эндпоинта POST /api/v1/analyze.
 
-Uses FakeDetector из conftest — no real model artifacts needed.
-/health и /ready покрыты в tests/test_health.py.
+Используется FakeDetector из conftest — реальные ML-артефакты не нужны.
+/health и /ready покрыты в tests/integration/test_health.py.
 """
 
 import json

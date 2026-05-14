@@ -44,10 +44,10 @@ class ProbabilityCalibrator:
         self._passthrough: set[str] = set()  # methods where ECE < threshold
 
     def load(self, ece_threshold: float = 0.05) -> None:
-        """Load calibrators from joblib files.
+        """Загружает калибраторы из joblib-файлов.
 
-        If a companion *_diagnostics.json file exists, check ECE.
-        If ECE_before < threshold, mark method as passthrough.
+        Если рядом лежит *_diagnostics.json — берёт оттуда ECE. Если ECE_before
+        ниже порога, метод помечается как passthrough (калибровка не нужна).
         """
         for method in ("tfidf", "transformer"):
             cal_path = self._calibration_dir / f"{method}_calibrator.joblib"

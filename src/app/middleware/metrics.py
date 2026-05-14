@@ -61,7 +61,7 @@ def record_request(
     latency_s: float,
     cascade_path: str | None = None,
 ) -> None:
-    """Record metrics for a completed request."""
+    """Записывает метрики по завершённому запросу."""
     REQUESTS_TOTAL.labels(status=status, risk_level=risk_level or "none").inc()
     LATENCY.observe(latency_s)
     if confidence is not None:

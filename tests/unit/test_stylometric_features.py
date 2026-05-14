@@ -1,4 +1,4 @@
-"""Tests for app.features.stylometric — 45 stylometric features."""
+"""Тесты app.features.stylometric — 45 стилометрических признаков."""
 
 import pandas as pd
 import pytest

@@ -1,7 +1,7 @@
-"""Tests for repositories — CRUD, idempotency, stats.
+"""Тесты репозиториев: CRUD, идемпотентность, агрегаты для статистики.
 
-Requires PostgreSQL (testcontainers or TEST_DATABASE_URL).
-Skipped gracefully if DB not available.
+Нужен PostgreSQL (testcontainers или TEST_DATABASE_URL). Если БД недоступна —
+тесты аккуратно скипаются.
 """
 
 from datetime import datetime, timezone

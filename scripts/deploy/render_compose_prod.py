@@ -1,7 +1,7 @@
-"""Generate scripts/deploy/docker-compose.prod.yml — то же что render_cloud_init,
+"""Собирает scripts/deploy/docker-compose.prod.yml — то же что render_cloud_init,
 но без обёртки cloud-init. Используется при scp-обновлении уже работающей VM.
 
-Usage:
+Пример:
     uv run python scripts/deploy/render_compose_prod.py \\
         --reg-id crpqbj2rjnrhcsfpes38 \\
         --pg-host rc1a-c8tcvredf5pdg33o.mdb.yandexcloud.net \\

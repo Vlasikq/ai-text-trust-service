@@ -1,4 +1,4 @@
-"""Tests for middleware, metrics, cache in API, and degradation scenarios."""
+"""Тесты middleware, metrics, cache в API и сценариев деградации."""
 
 import io
 import json

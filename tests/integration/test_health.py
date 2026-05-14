@@ -1,4 +1,4 @@
-"""Tests for liveness (/health) and readiness (/ready) probes.
+"""Тесты liveness (/health) и readiness (/ready) проб.
 
 `/health` — всегда 200 если процесс отвечает, минимум полей.
 `/ready`  — 200 когда detector.is_ready() и (если db_enabled) БД пингуется; иначе 503.

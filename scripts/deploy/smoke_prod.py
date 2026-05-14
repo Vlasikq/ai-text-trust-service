@@ -1,4 +1,4 @@
-"""End-to-end smoke для production API.
+"""Сквозной smoke-тест прод-API.
 
 Запуск:
     uv run python scripts/deploy/smoke_prod.py https://89.169.141.35.sslip.io/

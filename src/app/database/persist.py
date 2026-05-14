@@ -81,7 +81,7 @@ async def persist_with_fallback(
 
 
 def _write_fallback(analysis: Analysis, path: Path) -> None:
-    """Append analysis as JSON line to fallback log."""
+    """Дописывает analysis в fallback-лог одной JSON-строкой."""
     path.parent.mkdir(parents=True, exist_ok=True)
     record = {
         "request_id": str(analysis.request_id),

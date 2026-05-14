@@ -1,4 +1,4 @@
-"""Tests for app.calibration.platt — ProbabilityCalibrator and ECE."""
+"""Тесты app.calibration.platt — ProbabilityCalibrator и ECE."""
 
 import json
 from pathlib import Path

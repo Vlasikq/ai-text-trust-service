@@ -1,4 +1,4 @@
-"""Tests for app.explanation.markers — StyleExplainer."""
+"""Тесты app.explanation.markers — StyleExplainer."""
 
 import json
 from pathlib import Path

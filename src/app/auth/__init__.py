@@ -1,4 +1,4 @@
-"""Authentication subsystem: argon2 password hashing, JWT issue/verify, FastAPI dependencies.
+"""Подсистема аутентификации: argon2 для паролей, JWT и FastAPI-зависимости.
 
 Контракт:
   - argon2id для паролей (стойкость к GPU, время-параметризованный)

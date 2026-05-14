@@ -1,4 +1,4 @@
-"""Tests for app.cache — DetectionCache."""
+"""Тесты app.cache — DetectionCache."""
 
 from app.cache import DetectionCache
 from app.detectors.base import DetectionResult

@@ -1,4 +1,4 @@
-"""Render cloud-init.yaml.template + docker-compose.yml + Caddyfile в один cloud-init.
+"""Собирает cloud-init.yaml.template + docker-compose.yml + Caddyfile в один cloud-init.
 
 Использование:
     cd <repo>

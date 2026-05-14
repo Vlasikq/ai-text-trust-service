@@ -90,7 +90,7 @@ class SensitiveDataFilter(logging.Filter):
 
 
 def setup_logging(level: str = "INFO") -> None:
-    """Configure root logger with JSON formatter and correlation_id filter.
+    """Настраивает root-логгер: JSON-форматтер плюс фильтр для correlation_id.
 
     Идемпотентно: очищает существующие handler'ы — безопасно вызывать повторно
     (например, в тестах при множественных стартах приложения).

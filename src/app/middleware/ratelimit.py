@@ -1,8 +1,8 @@
-"""slowapi-based rate limiting.
+"""Rate-limit на базе slowapi.
 
 Подход:
   - `limiter` — глобальный singleton, key_func учитывает auth (user_id) и anon (IP).
-  - Лимиты-строки (e.g. "30/minute") берутся из Settings, ставятся декораторами на endpoints.
+  - Лимиты-строки (например, "30/minute") берутся из Settings, ставятся декораторами на эндпоинтах.
   - X-Forwarded-For уважается (за Caddy IP клиента в этом заголовке).
 
 Для тестов: можно передать `enabled=False` через env, тогда limiter не блокирует.
